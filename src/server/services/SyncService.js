@@ -125,6 +125,13 @@ export class SyncService {
       DELETE FROM config_versions
       WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid AND version = :version
     `);
+
+    this.stmtFindAnyRecord = this.db.prepare(`
+      SELECT * FROM config_records
+      WHERE content_type = :ct AND item_uid = :uid AND is_deleted = 0
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `);
   }
 
   getAdapter(contentType) {
@@ -326,30 +333,43 @@ export class SyncService {
 
     const adapter = this.getAdapter(contentType);
 
-    const record = this.stmtGetRecord.get({
-      ':owner': ownerHandle,
+    let targetOwner = ownerHandle;
+    let record = this.stmtGetRecord.get({
+      ':owner': targetOwner,
       ':ct': contentType,
       ':uid': itemUid,
     });
+
+    // 智能跨账号回退：若当前指定 owner 下未找到记录，但在云端其他账号（如 default-user）下存在该配置，自动回退拉取
+    if (!record) {
+      const anyRecord = this.stmtFindAnyRecord.get({
+        ':ct': contentType,
+        ':uid': itemUid,
+      });
+      if (anyRecord && this.auth.can(Permission.READ, authContext.handle, anyRecord.owner_handle, contentType, itemUid)) {
+        record = anyRecord;
+        targetOwner = anyRecord.owner_handle;
+      }
+    }
 
     if (!record) {
       throw new NotFoundError(`Config record not found: ${ownerHandle}/${contentType}/${itemUid}`);
     }
 
     if (record.is_deleted && targetVersion === null) {
-      throw new NotFoundError(`Config record has been deleted: ${ownerHandle}/${contentType}/${itemUid}`);
+      throw new NotFoundError(`Config record has been deleted: ${targetOwner}/${contentType}/${itemUid}`);
     }
 
     const versionToFetch = targetVersion ?? record.current_version;
     const versionRow = this.stmtGetVersion.get({
-      ':owner': ownerHandle,
+      ':owner': targetOwner,
       ':ct': contentType,
       ':uid': itemUid,
       ':version': versionToFetch,
     });
 
     if (!versionRow) {
-      throw new NotFoundError(`Version ${versionToFetch} not found for ${ownerHandle}/${contentType}/${itemUid}`);
+      throw new NotFoundError(`Version ${versionToFetch} not found for ${targetOwner}/${contentType}/${itemUid}`);
     }
 
     if (versionRow.operation === OperationType.DELETE) {
@@ -360,7 +380,7 @@ export class SyncService {
     const content = adapter.deserialize(buffer, versionRow.mime_type);
 
     return {
-      owner_handle: ownerHandle,
+      owner_handle: targetOwner,
       content_type: contentType,
       item_uid: itemUid,
       display_name: record.display_name,

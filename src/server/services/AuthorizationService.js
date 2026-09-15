@@ -47,13 +47,13 @@ export class AuthorizationService {
       return true;
     }
 
-    // 跨账号第一版仅开放只读权限 (READ)
-    if (action !== Permission.READ) {
-      return false;
+    // 在同一 SillyTavern 服务端实例内，已认证用户默认享有跨账号只读浏览与拉取权限
+    if (action === Permission.READ) {
+      return true;
     }
 
-    // 校验 share_grants
-    return this.hasApprovedGrant(ownerHandle, requesterHandle, contentType, itemUid);
+    // 写操作、回滚等操作，非所有者严格禁止
+    return false;
   }
 
   /**

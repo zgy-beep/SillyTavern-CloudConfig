@@ -171,6 +171,24 @@ test('Integration: Express Router Endpoints', async (t) => {
     assert.equal(diskContent.fontSize, 14);
   });
 
+  await t.test('10. GET /items?scope=cloud&all_owners=true returns items across owners', async () => {
+    const res = await fetch(`${baseUrl}/items?content_type=settings&scope=cloud&all_owners=true`);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.ok(data.items.length >= 1);
+    assert.equal(data.items[0].owner_handle, 'alice');
+    assert.equal(data.items[0].item_uid, itemUid);
+  });
+
+  await t.test('11. GET /pull with non-existent owner falls back to existing record', async () => {
+    // 假定请求者是 bob，以 bob 作为 owner 请求，但实际上是 alice 创建的
+    const pullRes = await fetch(`${baseUrl}/pull?content_type=settings&item_uid=${itemUid}&owner=bob`);
+    assert.equal(pullRes.status, 200);
+    const data = await pullRes.json();
+    assert.equal(data.owner_handle, 'alice'); // 自动回退到实际拥有者
+    assert.equal(data.version, 2);
+  });
+
   // 关闭服务
   server.close();
   dbClient.close();

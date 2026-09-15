@@ -66,12 +66,17 @@ export class CloudConfigApi {
     return this.request('/content-types');
   }
 
-  async getItems(contentType, owner = '', scope = 'cloud') {
+  async getOwners() {
+    return this.request('/owners');
+  }
+
+  async getItems(contentType, owner = '', scope = 'cloud', allOwners = false) {
     const params = new URLSearchParams({
       content_type: contentType,
       scope,
     });
-    if (owner) params.append('owner', owner);
+    if (allOwners) params.append('all_owners', 'true');
+    if (owner && !allOwners) params.append('owner', owner);
     return this.request(`/items?${params.toString()}`);
   }
 

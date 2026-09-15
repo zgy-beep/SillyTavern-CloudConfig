@@ -46,10 +46,23 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
     });
   });
 
-  // 2. GET /items?content_type=&owner=&scope=(local|cloud)
+  // 1.5 GET /owners
+  router.get('/owners', asyncHandler(async (req, res) => {
+    const stmt = syncService.db.prepare(`
+      SELECT DISTINCT owner_handle FROM config_records WHERE is_deleted = 0 ORDER BY owner_handle ASC
+    `);
+    const rows = stmt.all();
+    res.json({
+      owners: rows.map(r => r.owner_handle),
+      current_user: req.authContext.handle,
+    });
+  }));
+
+  // 2. GET /items?content_type=&owner=&scope=(local|cloud)&all_owners=
   router.get('/items', asyncHandler(async (req, res) => {
     const contentType = req.query.content_type;
-    const owner = req.query.owner || req.authContext.handle;
+    const isAllOwners = req.query.all_owners === 'true' || req.query.owner === 'all';
+    const owner = isAllOwners ? 'all' : (req.query.owner || req.authContext.handle);
     const scope = req.query.scope || 'cloud';
 
     if (!contentType) {
@@ -67,27 +80,38 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
       return res.json({ items: localItems });
     }
 
-    if (!authService.can(Permission.READ, req.authContext.handle, owner, contentType)) {
+    if (!isAllOwners && !authService.can(Permission.READ, req.authContext.handle, owner, contentType)) {
       return res.status(403).json({ error: 'Forbidden', message: 'No read permission on requested target' });
     }
 
     // 查询云端记录
-    const stmt = syncService.db.prepare(`
-      SELECT item_uid, display_name, current_version, current_checksum, updated_at
-      FROM config_records
-      WHERE owner_handle = :owner AND content_type = :ct AND is_deleted = 0
-      ORDER BY updated_at DESC
-    `);
-
-    const records = stmt.all({
-      ':owner': owner,
-      ':ct': contentType,
-    });
+    let records = [];
+    if (isAllOwners) {
+      const stmt = syncService.db.prepare(`
+        SELECT owner_handle, item_uid, display_name, current_version, current_checksum, updated_at
+        FROM config_records
+        WHERE content_type = :ct AND is_deleted = 0
+        ORDER BY updated_at DESC
+      `);
+      records = stmt.all({ ':ct': contentType });
+    } else {
+      const stmt = syncService.db.prepare(`
+        SELECT owner_handle, item_uid, display_name, current_version, current_checksum, updated_at
+        FROM config_records
+        WHERE owner_handle = :owner AND content_type = :ct AND is_deleted = 0
+        ORDER BY updated_at DESC
+      `);
+      records = stmt.all({
+        ':owner': owner,
+        ':ct': contentType,
+      });
+    }
 
     res.json({
       owner,
       content_type: contentType,
       items: records.map(r => ({
+        owner_handle: r.owner_handle,
         item_uid: r.item_uid,
         display_name: r.display_name,
         current_version: r.current_version,

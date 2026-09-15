@@ -18,8 +18,9 @@ export class ClientSyncManager {
   /**
    * 开启某项配置的云同步
    */
-  async enableSync(accountHandle, contentType, itemUid, displayName, localContent = null) {
-    const bindingUid = this.storage.makeBindingUid(accountHandle, accountHandle, contentType, itemUid);
+  async enableSync(accountHandle, contentType, itemUid, displayName, localContent = null, sourceOwnerHandle = null) {
+    const sourceOwner = sourceOwnerHandle || accountHandle;
+    const bindingUid = this.storage.makeBindingUid(accountHandle, sourceOwner, contentType, itemUid);
     let binding = await this.storage.getBinding(bindingUid);
 
     // 1. 如果此前处于 DISABLED_RESTORED 或全新开启，创建冷备份
@@ -34,8 +35,8 @@ export class ClientSyncManager {
         content_type: contentType,
         item_uid: itemUid,
         display_name: displayName,
-        source_owner_handle: accountHandle,
-        sync_mode: SyncMode.OWN,
+        source_owner_handle: sourceOwner,
+        sync_mode: sourceOwner !== accountHandle ? SyncMode.SUBSCRIBE : SyncMode.OWN,
         enabled: true,
         state: SyncState.BACKUP_CREATED,
         last_notified_version: 0,
@@ -122,8 +123,9 @@ export class ClientSyncManager {
     const res = await this.api.pull(
       binding.content_type,
       binding.item_uid,
-      binding.source_owner_handle,
-      null
+      binding.source_owner_handle || '',
+      null,
+      true
     );
 
     if (applyLocalCb) {
@@ -133,6 +135,9 @@ export class ClientSyncManager {
     binding.last_synced_version = res.version;
     binding.last_notified_version = res.version;
     binding.last_synced_checksum = res.checksum;
+    if (res.owner_handle) {
+      binding.source_owner_handle = res.owner_handle;
+    }
     binding.state = SyncState.SYNCED;
     await this.storage.saveBinding(binding);
 

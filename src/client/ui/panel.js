@@ -1,4 +1,4 @@
-import { SyncState } from '../../common/constants.js';
+import { SyncState, SyncMode } from '../../common/constants.js';
 import { showConflictDialog } from './conflictDialog.js';
 
 /**
@@ -46,9 +46,9 @@ export class CloudConfigPanel {
               <span class="cfgsync-toggle-all-text">全部展开</span>
             </button>
           </div>
-          <span style="font-size:12px; opacity:0.8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">账号: <strong class="cfgsync-account-label">${this.accountHandle}</strong></span>
+          <span style="font-size:12px; opacity:0.8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">当前账号: <strong class="cfgsync-account-label" style="color:#69c0ff;">${this.accountHandle}</strong></span>
         </div>
-        <div id="cfgsync-items-loading" style="text-align:center; padding:16px; font-size:12px; opacity:0.7;">正在加载同步配置...</div>
+        <div id="cfgsync-items-loading" style="text-align:center; padding:16px; font-size:12px; opacity:0.7;">正在加载配置...</div>
         <div id="cfgsync-items-tree"></div>
       </div>
     `;
@@ -95,7 +95,7 @@ export class CloudConfigPanel {
   }
 
   /**
-   * 静默增量刷新：保持现有 DOM 结构与折叠状态，绝不清空界面
+   * 静默增量刷新：同时获取本地与云端备份，支持跨账号拉取
    */
   async refresh() {
     if (!this.container) return;
@@ -104,7 +104,6 @@ export class CloudConfigPanel {
     const treeEl = this.container.querySelector('#cfgsync-items-tree');
     const loadingEl = this.container.querySelector('#cfgsync-items-loading');
 
-    // 仅在首次树为空时显示 loading，后续后台刷新时不隐藏已有项
     if (treeEl && treeEl.children.length === 0 && loadingEl) {
       loadingEl.style.display = 'block';
     }
@@ -134,8 +133,43 @@ export class CloudConfigPanel {
       };
 
       for (const ct of p0Types) {
+        // 1. 获取本地配置项
         const localRes = await this.api.getItems(ct, this.accountHandle, 'local').catch(() => ({ items: [] }));
-        const items = localRes.items || [];
+        const localItems = localRes.items || [];
+
+        // 2. 获取云端全量备份（跨所有账号）
+        const cloudRes = await this.api.getItems(ct, '', 'cloud', true).catch(() => ({ items: [] }));
+        const cloudItems = cloudRes.items || [];
+
+        // 3. 智能合并：既能在本地看到未同步项，也能在其它账号下看到已有云端备份
+        const itemMap = new Map();
+        for (const loc of localItems) {
+          itemMap.set(loc.itemUid, {
+            itemUid: loc.itemUid,
+            displayName: loc.displayName,
+            sourceRef: loc.sourceRef,
+            existsLocally: true,
+            cloudItem: null,
+          });
+        }
+
+        for (const cld of cloudItems) {
+          if (itemMap.has(cld.item_uid)) {
+            const existing = itemMap.get(cld.item_uid);
+            existing.cloudItem = cld;
+          } else {
+            // 仅存在于云端（例如由其它账号如 default-user 备份），本地尚未下载
+            itemMap.set(cld.item_uid, {
+              itemUid: cld.item_uid,
+              displayName: cld.display_name,
+              sourceRef: `来自云端 (${cld.owner_handle})`,
+              existsLocally: false,
+              cloudItem: cld,
+            });
+          }
+        }
+
+        const items = Array.from(itemMap.values());
         const displayTypeName = ctNameMap[ct] || ct;
 
         let groupDrawer = treeEl.querySelector(`.cfgsync-group-drawer[data-content-type="${ct}"]`);
@@ -170,11 +204,14 @@ export class CloudConfigPanel {
         `.cfgsync-item-row[data-content-type="${evt.content_type}"][data-item-uid="${evt.item_uid}"]`
       );
       if (row) {
-        const bindingUid = this.storage.makeBindingUid(this.accountHandle, evt.owner_handle || this.accountHandle, evt.content_type, evt.item_uid);
+        const sourceOwner = evt.owner_handle || this.accountHandle;
+        const bindingUid = this.storage.makeBindingUid(this.accountHandle, sourceOwner, evt.content_type, evt.item_uid);
         const binding = await this.storage.getBinding(bindingUid);
-        if (binding) {
-          this.updateRowState(row, binding);
-        }
+        this.updateRowState(row, binding, {
+          owner_handle: evt.owner_handle,
+          current_version: evt.version,
+          item_uid: evt.item_uid,
+        }, row._existsLocally);
       } else {
         hasMissingItem = true;
       }
@@ -247,7 +284,7 @@ export class CloudConfigPanel {
     if (!itemsContainer) return;
 
     if (items.length === 0) {
-      itemsContainer.innerHTML = `<div style="font-size:12px; opacity:0.6; padding: 6px 4px;">（本地未找到此类型配置）</div>`;
+      itemsContainer.innerHTML = `<div style="font-size:12px; opacity:0.6; padding: 6px 4px;">（暂无可用配置）</div>`;
       return;
     }
 
@@ -265,12 +302,12 @@ export class CloudConfigPanel {
       }
     });
 
-    // 原地更新已有项，或创建新项（保持展开与位置不变）
+    // 原地更新已有项，或创建新项
     for (const item of items) {
       const binding = bindingMap.get(`${ct}:${item.itemUid}`);
       let existingRow = itemsContainer.querySelector(`.cfgsync-item-row[data-item-uid="${item.itemUid}"]`);
       if (existingRow) {
-        this.updateRowState(existingRow, binding);
+        this.updateRowState(existingRow, binding, item.cloudItem, item.existsLocally);
       } else {
         const newRow = this.createItemRow(ct, item, binding);
         itemsContainer.appendChild(newRow);
@@ -278,10 +315,14 @@ export class CloudConfigPanel {
     }
   }
 
-  renderBadgeHtml(state, version) {
-    if (state === SyncState.SYNCED) {
+  renderBadgeHtml(state, version, cloudItem = null, binding = null) {
+    if (binding && binding.enabled && state === SyncState.SYNCED) {
+      if (cloudItem && cloudItem.current_version > (binding.last_synced_version || 0)) {
+        return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#faad14; color:#000; font-weight:600; white-space:nowrap;">☁️ 云端新版 (v${cloudItem.current_version})</span>`;
+      }
       const vText = version ? `v${version}` : '本地版';
-      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#52c41a; color:#fff; white-space:nowrap;">已同步 (${vText})</span>`;
+      const fromText = (binding.source_owner_handle && binding.source_owner_handle !== this.accountHandle) ? ` · ${binding.source_owner_handle}` : '';
+      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#52c41a; color:#fff; white-space:nowrap;">已同步 (${vText}${fromText})</span>`;
     }
     if (state === SyncState.CONFLICT) {
       return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#f5222d; color:#fff; white-space:nowrap;">⚠️ 冲突</span>`;
@@ -289,28 +330,35 @@ export class CloudConfigPanel {
     if (state === SyncState.BACKUP_CREATED) {
       return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#1890ff; color:#fff; white-space:nowrap;">冷备份就绪</span>`;
     }
+    if (cloudItem) {
+      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#722ed1; color:#fff; font-weight:500; white-space:nowrap;">云端就绪 (v${cloudItem.current_version} · ${cloudItem.owner_handle})</span>`;
+    }
     return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#555; color:#fff; white-space:nowrap;">未同步</span>`;
   }
 
-  updateRowState(row, binding) {
+  updateRowState(row, binding, cloudItem = null, existsLocally = true) {
     row._binding = binding;
+    if (cloudItem !== undefined) row._cloudItem = cloudItem;
+    row._existsLocally = existsLocally;
+    const cItem = row._cloudItem || null;
+
     const isEnabled = Boolean(binding?.enabled);
-    const state = binding?.state || SyncState.DISABLED;
-    const version = binding?.last_synced_version;
+    const state = binding?.state || (cItem ? 'CLOUD_AVAILABLE' : SyncState.DISABLED);
+    const version = binding?.last_synced_version || cItem?.current_version;
 
     const badgeContainer = row.querySelector('.cfgsync-state-badge-container');
     if (badgeContainer) {
-      badgeContainer.innerHTML = this.renderBadgeHtml(state, version);
+      badgeContainer.innerHTML = this.renderBadgeHtml(state, version, cItem, binding);
     }
 
     const pushBtn = row.querySelector('.cfgsync-push-btn');
     if (pushBtn) {
-      pushBtn.disabled = !isEnabled;
+      pushBtn.disabled = !existsLocally || !isEnabled;
     }
 
     const pullBtn = row.querySelector('.cfgsync-pull-btn');
     if (pullBtn) {
-      pullBtn.disabled = !isEnabled;
+      pullBtn.disabled = !cItem && !isEnabled;
     }
 
     const toggle = row.querySelector('.cfgsync-toggle');
@@ -331,9 +379,12 @@ export class CloudConfigPanel {
     `;
 
     row._binding = initialBinding;
+    row._cloudItem = item.cloudItem || null;
+    row._existsLocally = item.existsLocally !== false;
+
     const isEnabled = Boolean(initialBinding?.enabled);
-    const state = initialBinding?.state || SyncState.DISABLED;
-    const version = initialBinding?.last_synced_version;
+    const state = initialBinding?.state || (item.cloudItem ? 'CLOUD_AVAILABLE' : SyncState.DISABLED);
+    const version = initialBinding?.last_synced_version || item.cloudItem?.current_version;
 
     row.innerHTML = `
       <div style="display:flex; align-items:center; gap:10px; min-width:0; flex:1;">
@@ -345,26 +396,28 @@ export class CloudConfigPanel {
       </div>
       <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
         <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center;">
-          ${this.renderBadgeHtml(state, version)}
+          ${this.renderBadgeHtml(state, version, item.cloudItem, initialBinding)}
         </div>
-        <button class="cfgsync-push-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${!isEnabled ? 'disabled' : ''}>推云端</button>
-        <button class="cfgsync-pull-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${!isEnabled ? 'disabled' : ''}>拉云端</button>
+        <button class="cfgsync-push-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${(!row._existsLocally || !isEnabled) ? 'disabled' : ''}>推云端</button>
+        <button class="cfgsync-pull-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${(!item.cloudItem && !isEnabled) ? 'disabled' : ''}>拉云端</button>
       </div>
     `;
 
-    // 勾选切换开关（原地更新，绝不全量重建，彻底杜绝抖动）
+    // 勾选切换开关
     const toggle = row.querySelector('.cfgsync-toggle');
     toggle.onchange = async () => {
       toggle.disabled = true;
       try {
         if (toggle.checked) {
-          const binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName);
-          this.updateRowState(row, binding);
+          const sourceOwner = row._cloudItem?.owner_handle || this.accountHandle;
+          const binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
+          this.updateRowState(row, binding, row._cloudItem, row._existsLocally);
         } else {
           const confirmRestore = confirm(`是否在关闭同步时恢复为开启同步前的本地原始配置？\n点击【确定】恢复备份，点击【取消】保留当前配置。`);
-          const bindingUid = this.storage.makeBindingUid(this.accountHandle, this.accountHandle, contentType, item.itemUid);
+          const sourceOwner = row._binding?.source_owner_handle || row._cloudItem?.owner_handle || this.accountHandle;
+          const bindingUid = this.storage.makeBindingUid(this.accountHandle, sourceOwner, contentType, item.itemUid);
           const binding = await this.syncManager.disableSync(bindingUid, confirmRestore);
-          this.updateRowState(row, binding);
+          this.updateRowState(row, binding, row._cloudItem, row._existsLocally);
         }
       } catch (err) {
         console.error('[cfgsync] toggle error:', err);
@@ -378,6 +431,10 @@ export class CloudConfigPanel {
     // 手动推送到云端
     const pushBtn = row.querySelector('.cfgsync-push-btn');
     pushBtn.onclick = async () => {
+      if (!row._binding) {
+        const sourceOwner = row._cloudItem?.owner_handle || this.accountHandle;
+        row._binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
+      }
       pushBtn.disabled = true;
       const origText = pushBtn.textContent;
       pushBtn.textContent = '推送中...';
@@ -399,11 +456,12 @@ export class CloudConfigPanel {
             serverVersion: res.serverVersion,
             onResolve: async (choice) => {
               await this.syncManager.resolveConflict(row._binding, choice, localPayload);
-              this.updateRowState(row, row._binding);
+              this.updateRowState(row, row._binding, row._cloudItem, true);
             },
           });
         } else {
-          this.updateRowState(row, row._binding);
+          row._existsLocally = true;
+          this.updateRowState(row, row._binding, row._cloudItem, true);
         }
       } catch (e) {
         alert(`推送失败: ${e.message}`);
@@ -413,19 +471,24 @@ export class CloudConfigPanel {
       }
     };
 
-    // 手动从云端拉取
+    // 手动从云端拉取（支持跨账号从任意云端备份拉取并写入本地）
     const pullBtn = row.querySelector('.cfgsync-pull-btn');
     pullBtn.onclick = async () => {
+      if (!row._binding) {
+        const sourceOwner = row._cloudItem?.owner_handle || this.accountHandle;
+        row._binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
+      }
       pullBtn.disabled = true;
       const origText = pullBtn.textContent;
       pullBtn.textContent = '拉取中...';
       try {
-        await this.syncManager.pullCloud(row._binding);
-        this.updateRowState(row, row._binding);
+        const res = await this.syncManager.pullCloud(row._binding);
+        row._existsLocally = true;
+        this.updateRowState(row, row._binding, row._cloudItem, true);
       } catch (e) {
         alert(`拉取失败: ${e.message}`);
       } finally {
-        pullBtn.disabled = !row._binding?.enabled;
+        pullBtn.disabled = false;
         pullBtn.textContent = origText;
       }
     };
