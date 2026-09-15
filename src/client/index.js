@@ -44,7 +44,7 @@ export async function initExtension() {
     section.className = 'extension_settings_section';
     section.innerHTML = `
       <div class="title_restorable">
-        <h4>☁️ 配置云同步 (CloudConfig)</h4>
+        <h4>☁️ 配置云同步</h4>
       </div>
       <div id="cfgsync-panel-root"></div>
     `;

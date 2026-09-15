@@ -31,7 +31,7 @@ export class CloudConfigPanel {
     this.container.innerHTML = `
       <div class="cfgsync-panel-container" style="padding: 16px; font-family: sans-serif;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-          <h3 style="margin:0;">☁️ SillyTavern 配置云同步</h3>
+          <h3 style="margin:0;">☁️ 配置云同步</h3>
           <span style="font-size:12px; opacity:0.8;">当前账号: <strong>${this.accountHandle}</strong></span>
         </div>
         <div id="cfgsync-items-loading" style="text-align:center; padding:20px;">正在加载同步配置...</div>
