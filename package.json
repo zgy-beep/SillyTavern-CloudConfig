@@ -1,0 +1,26 @@
+{
+  "name": "sillytavern-cloudconfig",
+  "version": "0.1.0",
+  "description": "SillyTavern 多用户多设备配置云同步与共享插件",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zgy-beep/SillyTavern-CloudConfig.git"
+  },
+  "keywords": [
+    "sillytavern",
+    "sillytavern-plugin",
+    "cloud-sync",
+    "configuration"
+  ],
+  "author": "zgy-beep",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/zgy-beep/SillyTavern-CloudConfig/issues"
+  },
+  "homepage": "https://github.com/zgy-beep/SillyTavern-CloudConfig#readme"
+}
