@@ -70,7 +70,23 @@ export class CloudConfigPanel {
         treeEl.appendChild(groupEl);
       }
     } catch (err) {
-      this.container.innerHTML = `<div style="color:#ff4d4f; padding:20px;">加载配置失败: ${err.message}</div>`;
+      if (err.status === 404 || err.message?.includes('404')) {
+        this.container.innerHTML = `
+          <div style="background: rgba(255, 77, 79, 0.1); border: 1px solid #ff4d4f; border-radius: 6px; padding: 16px; margin: 12px 0;">
+            <h4 style="color:#ff4d4f; margin-top:0;">⚠️ 服务端插件未就绪</h4>
+            <p style="font-size:13px; line-height:1.6; margin-bottom:8px;">
+              当前仅加载了前端扩展，SillyTavern 后端尚未激活插件路由。请检查以下配置：
+            </p>
+            <ol style="font-size:12px; line-height:1.8; margin:0 0 10px 20px; padding:0;">
+              <li>本仓库需放置或软链接到 SillyTavern 的 <code>plugins/cfgsync</code> 目录；</li>
+              <li>在 <code>config.yaml</code> 中确认已开启 <code>enableServerPlugins: true</code>；</li>
+              <li>重启 SillyTavern 服务端。</li>
+            </ol>
+          </div>
+        `;
+      } else {
+        this.container.innerHTML = `<div style="color:#ff4d4f; padding:20px;">加载配置失败: ${err.message}</div>`;
+      }
     }
   }
 
