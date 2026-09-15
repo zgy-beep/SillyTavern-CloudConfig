@@ -72,22 +72,29 @@ export class CloudConfigPanel {
     } catch (err) {
       if (err.status === 404 || err.message?.includes('404')) {
         this.container.innerHTML = `
-          <div style="background: var(--SmartThemeBodyColor, #20232a); border: 1px solid #ff4d4f; border-radius: 6px; padding: 14px; margin: 6px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
-            <h4 style="color:#ff4d4f; margin-top:0; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+          <div style="box-sizing: border-box; width: 100%; background: #1c181a; border: 1px solid rgba(255, 77, 79, 0.4); border-left: 4px solid #ff4d4f; border-radius: 6px; padding: 12px; margin: 4px 0; color: #f5f5f5;">
+            <div style="color: #ff4d4f; font-weight: 600; font-size: 13px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
               <span>⚠️</span> 服务端插件未就绪
-            </h4>
-            <p style="font-size:12px; line-height:1.6; margin-bottom:8px; color: var(--SmartThemeQuoteColor, #ddd);">
-              当前仅加载了前端扩展，SillyTavern 后端尚未激活插件路由。请检查以下配置：
-            </p>
-            <ol style="font-size:12px; line-height:1.8; margin:0 0 10px 18px; padding:0; color: var(--SmartThemeQuoteColor, #ccc);">
-              <li>本仓库需放置或软链接到 SillyTavern 的 <code>plugins/cfgsync</code> 目录；</li>
-              <li>在 <code>config.yaml</code> 中确认已开启 <code>enableServerPlugins: true</code>；</li>
+            </div>
+            <div style="font-size: 12px; line-height: 1.6; margin-bottom: 8px; color: #d0d0d0;">
+              当前仅加载了前端扩展，SillyTavern 后端尚未激活插件路由。请按以下步骤启用：
+            </div>
+            <ol style="font-size: 12px; line-height: 1.8; margin: 0 0 10px 18px; padding: 0; color: #c5c5c5;">
+              <li>将本仓库移动或软链接到 <code>SillyTavern/plugins/cfgsync</code>；</li>
+              <li>在 <code>config.yaml</code> 中确认 <code>enableServerPlugins: true</code>；</li>
               <li>重启 SillyTavern 服务端。</li>
             </ol>
+            <button class="menu_button cfgsync-retry-btn" style="width: 100%; padding: 6px; font-size: 12px; cursor: pointer;">
+              🔄 重新检测服务状态
+            </button>
           </div>
         `;
+        const retryBtn = this.container.querySelector('.cfgsync-retry-btn');
+        if (retryBtn) {
+          retryBtn.onclick = () => this.refresh();
+        }
       } else {
-        this.container.innerHTML = `<div style="color:#ff4d4f; padding:20px;">加载配置失败: ${err.message}</div>`;
+        this.container.innerHTML = `<div style="color:#ff4d4f; padding:12px; font-size:12px;">加载配置失败: ${err.message}</div>`;
       }
     }
   }

@@ -44,15 +44,17 @@ export async function initExtension() {
     if (!drawer) return false;
 
     const drawerContainer = document.createElement('div');
-    drawerContainer.id = 'cfgsync-drawer-container';
-    drawerContainer.className = 'inline-drawer';
+    drawerContainer.id = 'cfgsync-extension-container';
+    drawerContainer.className = 'extension_settings';
     drawerContainer.innerHTML = `
-      <div class="inline-drawer-toggle inline-drawer-header">
-        <b>☁️ 配置云同步</b>
-        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-      </div>
-      <div class="inline-drawer-content" style="display: none;">
-        <div id="cfgsync-panel-root"></div>
+      <div class="inline-drawer" style="box-sizing: border-box; width: 100%;">
+        <div class="inline-drawer-toggle inline-drawer-header">
+          <b>☁️ 配置云同步</b>
+          <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content" style="display: none; box-sizing: border-box; width: 100%; padding: 8px 10px;">
+          <div id="cfgsync-panel-root" style="box-sizing: border-box; width: 100%;"></div>
+        </div>
       </div>
     `;
 
