@@ -30,10 +30,23 @@ export class CloudConfigPanel {
   async refresh() {
     if (!this.container) return;
 
+    // 记录已展开的分类，以便在刷新后保持用户的展开/折叠状态
+    const expandedCategories = new Set();
+    this.container.querySelectorAll('.cfgsync-group-drawer').forEach(drawer => {
+      const ct = drawer.dataset.contentType;
+      const content = drawer.querySelector('.inline-drawer-content');
+      if (ct && content && content.style.display !== 'none' && getComputedStyle(content).display !== 'none') {
+        expandedCategories.add(ct);
+      }
+    });
+
     this.container.innerHTML = `
-      <div class="cfgsync-panel-container" style="padding: 10px 4px; font-family: sans-serif;">
+      <div class="cfgsync-panel-container" style="padding: 6px 2px; font-family: sans-serif;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:6px; border-bottom: 1px solid rgba(255,255,255,0.08);">
-          <span style="font-size:12px; font-weight:600; opacity:0.9;">云端配置项</span>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:12px; font-weight:600; opacity:0.9;">云端配置项</span>
+            <button id="cfgsync-toggle-all-btn" class="menu_button" style="font-size:11px; padding:2px 8px; cursor:pointer;">全部展开</button>
+          </div>
           <span style="font-size:12px; opacity:0.8;">账号: <strong class="cfgsync-account-label">${this.accountHandle}</strong></span>
         </div>
         <div id="cfgsync-items-loading" style="text-align:center; padding:16px; font-size:12px; opacity:0.7;">正在加载同步配置...</div>
@@ -68,27 +81,98 @@ export class CloudConfigPanel {
         'world': '世界设定 / 规则书 (World Info)',
       };
 
-      for (const ct of p0Types) {
-        const groupEl = document.createElement('div');
-        groupEl.style.cssText = 'margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px;';
-        const displayTypeName = ctNameMap[ct] || ct;
-        groupEl.innerHTML = `<h4 style="margin:0 0 10px 0; font-size:13px; font-weight:600; color: #1890ff;">${displayTypeName}</h4>`;
+      const toggleAllBtn = this.container.querySelector('#cfgsync-toggle-all-btn');
+      let allExpanded = false;
+      if (toggleAllBtn) {
+        toggleAllBtn.onclick = () => {
+          allExpanded = !allExpanded;
+          toggleAllBtn.textContent = allExpanded ? '全部折叠' : '全部展开';
+          const groupDrawers = treeEl.querySelectorAll('.cfgsync-group-drawer');
+          groupDrawers.forEach(drawer => {
+            const content = drawer.querySelector('.inline-drawer-content');
+            const icon = drawer.querySelector('.inline-drawer-icon');
+            if (allExpanded) {
+              if (window.$) {
+                $(content).stop().slideDown(150);
+              } else {
+                content.style.display = 'block';
+              }
+              if (icon) {
+                icon.classList.remove('down');
+                icon.classList.add('up');
+              }
+            } else {
+              if (window.$) {
+                $(content).stop().slideUp(150);
+              } else {
+                content.style.display = 'none';
+              }
+              if (icon) {
+                icon.classList.remove('up');
+                icon.classList.add('down');
+              }
+            }
+          });
+        };
+      }
 
+      for (const ct of p0Types) {
         // 读取本地可同步对象
         const localRes = await this.api.getItems(ct, this.accountHandle, 'local').catch(() => ({ items: [] }));
         const items = localRes.items || [];
+        const displayTypeName = ctNameMap[ct] || ct;
+
+        // 如果用户之前已经手动展开过此分类，则保持展开；否则默认折叠
+        const isExpanded = expandedCategories.has(ct);
+
+        const groupDrawer = document.createElement('div');
+        groupDrawer.className = 'inline-drawer cfgsync-group-drawer';
+        groupDrawer.dataset.contentType = ct;
+        groupDrawer.style.cssText = 'margin-bottom: 8px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; overflow: hidden;';
+
+        const countBadge = items.length > 0
+          ? `<span style="font-size: 11px; padding: 1px 7px; border-radius: 10px; background: rgba(24, 144, 255, 0.2); color: #69c0ff; font-weight: normal;">${items.length}</span>`
+          : `<span style="font-size: 11px; padding: 1px 7px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); opacity: 0.5; font-weight: normal;">0</span>`;
+
+        groupDrawer.innerHTML = `
+          <div class="inline-drawer-toggle inline-drawer-header" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: rgba(255, 255, 255, 0.03); user-select: none;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <b style="font-size: 13px; color: #1890ff;">${displayTypeName}</b>
+              ${countBadge}
+            </div>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down ${isExpanded ? 'up' : 'down'}"></div>
+          </div>
+          <div class="inline-drawer-content" style="display: ${isExpanded ? 'block' : 'none'}; padding: 6px 8px;">
+            <div class="cfgsync-group-items"></div>
+          </div>
+        `;
+
+        const itemsContainer = groupDrawer.querySelector('.cfgsync-group-items');
 
         if (items.length === 0) {
-          groupEl.innerHTML += `<div style="font-size:12px; opacity:0.6; margin-left:12px;">（本地未找到此类型配置）</div>`;
+          itemsContainer.innerHTML = `<div style="font-size:12px; opacity:0.6; padding: 6px 4px;">（本地未找到此类型配置）</div>`;
         } else {
           for (const item of items) {
             const binding = bindingMap.get(`${ct}:${item.itemUid}`);
             const itemRow = this.createItemRow(ct, item, binding);
-            groupEl.appendChild(itemRow);
+            itemsContainer.appendChild(itemRow);
           }
         }
 
-        treeEl.appendChild(groupEl);
+        // 针对无 jQuery 环境做原生兼容点击
+        if (!window.$) {
+          const toggleBtn = groupDrawer.querySelector('.inline-drawer-toggle');
+          const contentEl = groupDrawer.querySelector('.inline-drawer-content');
+          const iconEl = groupDrawer.querySelector('.inline-drawer-icon');
+          toggleBtn.addEventListener('click', () => {
+            const isHidden = contentEl.style.display === 'none';
+            contentEl.style.display = isHidden ? 'block' : 'none';
+            iconEl.classList.toggle('down', !isHidden);
+            iconEl.classList.toggle('up', isHidden);
+          });
+        }
+
+        treeEl.appendChild(groupDrawer);
       }
     } catch (err) {
       if (err.status === 404 || err.message?.includes('404')) {
