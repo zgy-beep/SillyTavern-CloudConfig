@@ -5,7 +5,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/unit/*.test.js tests/integration/*.test.js"
   },
   "repository": {
     "type": "git",
@@ -22,5 +22,8 @@
   "bugs": {
     "url": "https://github.com/zgy-beep/SillyTavern-CloudConfig/issues"
   },
-  "homepage": "https://github.com/zgy-beep/SillyTavern-CloudConfig#readme"
+  "homepage": "https://github.com/zgy-beep/SillyTavern-CloudConfig#readme",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
 }
