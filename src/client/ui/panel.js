@@ -24,21 +24,17 @@ export class CloudConfigPanel {
 
   render(targetEl) {
     this.container = targetEl;
+    this.ensureShell();
     this.refresh();
   }
 
-  async refresh() {
-    if (!this.container) return;
-
-    // 记录已展开的分类，以便在刷新后保持用户的展开/折叠状态
-    const expandedCategories = new Set();
-    this.container.querySelectorAll('.cfgsync-group-drawer').forEach(drawer => {
-      const ct = drawer.dataset.contentType;
-      const content = drawer.querySelector('.cfgsync-drawer-content');
-      if (ct && content && content.style.display === 'block') {
-        expandedCategories.add(ct);
-      }
-    });
+  /**
+   * 仅在容器未就绪时初始化外层骨架，绝不重复清空已有 DOM
+   */
+  ensureShell() {
+    if (!this.container || this.container.querySelector('.cfgsync-panel-container')) {
+      return;
+    }
 
     this.container.innerHTML = `
       <div class="cfgsync-panel-container" style="padding: 6px 2px; font-family: sans-serif;">
@@ -57,6 +53,62 @@ export class CloudConfigPanel {
       </div>
     `;
 
+    this.bindToggleAll();
+  }
+
+  bindToggleAll() {
+    const toggleAllBtn = this.container.querySelector('#cfgsync-toggle-all-btn');
+    if (!toggleAllBtn || toggleAllBtn.dataset.bound) return;
+    toggleAllBtn.dataset.bound = 'true';
+
+    let allExpanded = false;
+    toggleAllBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      allExpanded = !allExpanded;
+      const textSpan = toggleAllBtn.querySelector('.cfgsync-toggle-all-text');
+      const iconI = toggleAllBtn.querySelector('i');
+      if (textSpan) textSpan.textContent = allExpanded ? '全部折叠' : '全部展开';
+      if (iconI) {
+        iconI.className = allExpanded ? 'fa-solid fa-angles-up' : 'fa-solid fa-angles-down';
+      }
+      const treeEl = this.container.querySelector('#cfgsync-items-tree');
+      if (!treeEl) return;
+      const groupDrawers = treeEl.querySelectorAll('.cfgsync-group-drawer');
+      groupDrawers.forEach(drawer => {
+        const content = drawer.querySelector('.cfgsync-drawer-content');
+        const icon = drawer.querySelector('.inline-drawer-icon');
+        if (content) {
+          content.style.display = allExpanded ? 'block' : 'none';
+        }
+        if (icon) {
+          if (allExpanded) {
+            icon.classList.remove('down');
+            icon.classList.add('up');
+          } else {
+            icon.classList.remove('up');
+            icon.classList.add('down');
+          }
+        }
+      });
+    };
+  }
+
+  /**
+   * 静默增量刷新：保持现有 DOM 结构与折叠状态，绝不清空界面
+   */
+  async refresh() {
+    if (!this.container) return;
+    this.ensureShell();
+
+    const treeEl = this.container.querySelector('#cfgsync-items-tree');
+    const loadingEl = this.container.querySelector('#cfgsync-items-loading');
+
+    // 仅在首次树为空时显示 loading，后续后台刷新时不隐藏已有项
+    if (treeEl && treeEl.children.length === 0 && loadingEl) {
+      loadingEl.style.display = 'block';
+    }
+
     try {
       const typeRes = await this.api.getContentTypes();
       if (typeRes.current_user && this.accountHandle !== typeRes.current_user) {
@@ -72,9 +124,6 @@ export class CloudConfigPanel {
       const bindings = await this.storage.getBindingsByAccount(this.accountHandle);
       const bindingMap = new Map(bindings.map(b => [`${b.content_type}:${b.item_uid}`, b]));
 
-      const treeEl = this.container.querySelector('#cfgsync-items-tree');
-      this.container.querySelector('#cfgsync-items-loading').style.display = 'none';
-
       const ctNameMap = {
         'settings': '通用设置 (Settings)',
         'openai_preset': 'OpenAI 预设 (Presets)',
@@ -84,132 +133,147 @@ export class CloudConfigPanel {
         'world': '世界设定 / 规则书 (World Info)',
       };
 
-      const toggleAllBtn = this.container.querySelector('#cfgsync-toggle-all-btn');
-      let allExpanded = false;
-      if (toggleAllBtn) {
-        toggleAllBtn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          allExpanded = !allExpanded;
-          const textSpan = toggleAllBtn.querySelector('.cfgsync-toggle-all-text');
-          const iconI = toggleAllBtn.querySelector('i');
-          if (textSpan) textSpan.textContent = allExpanded ? '全部折叠' : '全部展开';
-          if (iconI) {
-            iconI.className = allExpanded ? 'fa-solid fa-angles-up' : 'fa-solid fa-angles-down';
-          }
-          const groupDrawers = treeEl.querySelectorAll('.cfgsync-group-drawer');
-          groupDrawers.forEach(drawer => {
-            const content = drawer.querySelector('.cfgsync-drawer-content');
-            const icon = drawer.querySelector('.inline-drawer-icon');
-            if (content) {
-              content.style.display = allExpanded ? 'block' : 'none';
-            }
-            if (icon) {
-              if (allExpanded) {
-                icon.classList.remove('down');
-                icon.classList.add('up');
-              } else {
-                icon.classList.remove('up');
-                icon.classList.add('down');
-              }
-            }
-          });
-        };
-      }
-
       for (const ct of p0Types) {
-        // 读取本地可同步对象
         const localRes = await this.api.getItems(ct, this.accountHandle, 'local').catch(() => ({ items: [] }));
         const items = localRes.items || [];
         const displayTypeName = ctNameMap[ct] || ct;
 
-        // 如果用户之前已经手动展开过此分类，则保持展开；否则默认折叠
-        const isExpanded = expandedCategories.has(ct);
-
-        const groupDrawer = document.createElement('div');
-        groupDrawer.className = 'cfgsync-group-drawer';
-        groupDrawer.dataset.contentType = ct;
-        groupDrawer.style.cssText = 'margin-bottom: 8px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; overflow: hidden; background: rgba(0, 0, 0, 0.1);';
-
-        const countBadge = items.length > 0
-          ? `<span style="font-size: 11px; padding: 1px 7px; border-radius: 10px; background: rgba(24, 144, 255, 0.2); color: #69c0ff; font-weight: normal;">${items.length}</span>`
-          : `<span style="font-size: 11px; padding: 1px 7px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); opacity: 0.5; font-weight: normal;">0</span>`;
-
-        groupDrawer.innerHTML = `
-          <div class="inline-drawer-header cfgsync-drawer-toggle" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: rgba(255, 255, 255, 0.03); user-select: none; transition: background 0.15s ease;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <b style="font-size: 13px; color: #1890ff;">${displayTypeName}</b>
-              ${countBadge}
-            </div>
-            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down ${isExpanded ? 'up' : 'down'}" style="transition: transform 0.15s ease-in-out; font-size: 14px;"></div>
-          </div>
-          <div class="cfgsync-drawer-content" style="display: ${isExpanded ? 'block' : 'none'}; padding: 6px 8px;">
-            <div class="cfgsync-group-items"></div>
-          </div>
-        `;
-
-        const itemsContainer = groupDrawer.querySelector('.cfgsync-group-items');
-
-        if (items.length === 0) {
-          itemsContainer.innerHTML = `<div style="font-size:12px; opacity:0.6; padding: 6px 4px;">（本地未找到此类型配置）</div>`;
-        } else {
-          for (const item of items) {
-            const binding = bindingMap.get(`${ct}:${item.itemUid}`);
-            const itemRow = this.createItemRow(ct, item, binding);
-            itemsContainer.appendChild(itemRow);
-          }
+        let groupDrawer = treeEl.querySelector(`.cfgsync-group-drawer[data-content-type="${ct}"]`);
+        if (!groupDrawer) {
+          groupDrawer = this.createGroupDrawer(ct, displayTypeName);
+          treeEl.appendChild(groupDrawer);
         }
 
-        // 高性能瞬时原生切换，杜绝 jQuery 逐帧高度计算导致的掉帧与高度截断异常
-        const toggleBtn = groupDrawer.querySelector('.cfgsync-drawer-toggle');
-        const contentEl = groupDrawer.querySelector('.cfgsync-drawer-content');
-        const iconEl = groupDrawer.querySelector('.inline-drawer-icon');
-
-        toggleBtn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const isHidden = contentEl.style.display === 'none';
-          contentEl.style.display = isHidden ? 'block' : 'none';
-          if (isHidden) {
-            iconEl.classList.remove('down');
-            iconEl.classList.add('up');
-          } else {
-            iconEl.classList.remove('up');
-            iconEl.classList.add('down');
-          }
-        };
-
-        toggleBtn.onmouseenter = () => { toggleBtn.style.background = 'rgba(255, 255, 255, 0.06)'; };
-        toggleBtn.onmouseleave = () => { toggleBtn.style.background = 'rgba(255, 255, 255, 0.03)'; };
-
-        treeEl.appendChild(groupDrawer);
+        this.updateGroupDrawer(groupDrawer, ct, items, bindingMap);
       }
+
+      if (loadingEl) loadingEl.style.display = 'none';
     } catch (err) {
+      if (loadingEl) loadingEl.style.display = 'none';
       if (err.status === 404 || err.message?.includes('404')) {
-        this.container.innerHTML = `
-          <div style="box-sizing: border-box; width: 100%; background: #1c181a; border: 1px solid rgba(255, 77, 79, 0.4); border-left: 4px solid #ff4d4f; border-radius: 6px; padding: 12px; margin: 4px 0; color: #f5f5f5;">
-            <div style="color: #ff4d4f; font-weight: 600; font-size: 13px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
-              <span>⚠️</span> 服务端插件未就绪
-            </div>
-            <div style="font-size: 12px; line-height: 1.6; margin-bottom: 8px; color: #d0d0d0;">
-              当前仅加载了前端扩展，SillyTavern 后端尚未激活插件路由。请按以下步骤启用：
-            </div>
-            <ol style="font-size: 12px; line-height: 1.8; margin: 0 0 10px 18px; padding: 0; color: #c5c5c5;">
-              <li>将本仓库移动或软链接到 <code>SillyTavern/plugins/cfgsync</code>；</li>
-              <li>在 <code>config.yaml</code> 中确认 <code>enableServerPlugins: true</code>；</li>
-              <li>重启 SillyTavern 服务端。</li>
-            </ol>
-            <button class="menu_button cfgsync-retry-btn" style="width: 100%; padding: 6px; font-size: 12px; cursor: pointer;">
-              🔄 重新检测服务状态
-            </button>
-          </div>
-        `;
-        const retryBtn = this.container.querySelector('.cfgsync-retry-btn');
-        if (retryBtn) {
-          retryBtn.onclick = () => this.refresh();
+        this.renderServerErrorNotice();
+      } else {
+        console.warn('[cfgsync] Refresh error:', err.message);
+      }
+    }
+  }
+
+  /**
+   * 后台轮询事件回调：直接原地更新对应项，零刷新、零抖动
+   */
+  async handlePollerUpdate(events) {
+    if (!this.container || !Array.isArray(events) || events.length === 0) return;
+
+    let hasMissingItem = false;
+    for (const evt of events) {
+      const row = this.container.querySelector(
+        `.cfgsync-item-row[data-content-type="${evt.content_type}"][data-item-uid="${evt.item_uid}"]`
+      );
+      if (row) {
+        const bindingUid = this.storage.makeBindingUid(this.accountHandle, evt.owner_handle || this.accountHandle, evt.content_type, evt.item_uid);
+        const binding = await this.storage.getBinding(bindingUid);
+        if (binding) {
+          this.updateRowState(row, binding);
         }
       } else {
-        this.container.innerHTML = `<div style="color:#ff4d4f; padding:12px; font-size:12px;">加载配置失败: ${err.message}</div>`;
+        hasMissingItem = true;
+      }
+    }
+
+    if (hasMissingItem) {
+      await this.refresh();
+    }
+  }
+
+  createGroupDrawer(ct, displayTypeName) {
+    const groupDrawer = document.createElement('div');
+    groupDrawer.className = 'cfgsync-group-drawer';
+    groupDrawer.dataset.contentType = ct;
+    groupDrawer.style.cssText = 'margin-bottom: 8px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; overflow: hidden; background: rgba(0, 0, 0, 0.1);';
+
+    groupDrawer.innerHTML = `
+      <div class="inline-drawer-header cfgsync-drawer-toggle" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: rgba(255, 255, 255, 0.03); user-select: none; transition: background 0.15s ease;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <b style="font-size: 13px; color: #1890ff;">${displayTypeName}</b>
+          <span class="cfgsync-count-badge" style="font-size: 11px; padding: 1px 7px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); opacity: 0.5; font-weight: normal;">0</span>
+        </div>
+        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="transition: transform 0.15s ease-in-out; font-size: 14px;"></div>
+      </div>
+      <div class="cfgsync-drawer-content" style="display: none; padding: 6px 8px;">
+        <div class="cfgsync-group-items"></div>
+      </div>
+    `;
+
+    const toggleBtn = groupDrawer.querySelector('.cfgsync-drawer-toggle');
+    const contentEl = groupDrawer.querySelector('.cfgsync-drawer-content');
+    const iconEl = groupDrawer.querySelector('.inline-drawer-icon');
+
+    toggleBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const isHidden = contentEl.style.display === 'none';
+      contentEl.style.display = isHidden ? 'block' : 'none';
+      if (isHidden) {
+        iconEl.classList.remove('down');
+        iconEl.classList.add('up');
+      } else {
+        iconEl.classList.remove('up');
+        iconEl.classList.add('down');
+      }
+    };
+
+    toggleBtn.onmouseenter = () => { toggleBtn.style.background = 'rgba(255, 255, 255, 0.06)'; };
+    toggleBtn.onmouseleave = () => { toggleBtn.style.background = 'rgba(255, 255, 255, 0.03)'; };
+
+    return groupDrawer;
+  }
+
+  updateGroupDrawer(groupDrawer, ct, items, bindingMap) {
+    const badgeEl = groupDrawer.querySelector('.cfgsync-count-badge');
+    if (badgeEl) {
+      badgeEl.textContent = String(items.length);
+      if (items.length > 0) {
+        badgeEl.style.background = 'rgba(24, 144, 255, 0.2)';
+        badgeEl.style.color = '#69c0ff';
+        badgeEl.style.opacity = '1';
+      } else {
+        badgeEl.style.background = 'rgba(255, 255, 255, 0.08)';
+        badgeEl.style.color = '';
+        badgeEl.style.opacity = '0.5';
+      }
+    }
+
+    const itemsContainer = groupDrawer.querySelector('.cfgsync-group-items');
+    if (!itemsContainer) return;
+
+    if (items.length === 0) {
+      itemsContainer.innerHTML = `<div style="font-size:12px; opacity:0.6; padding: 6px 4px;">（本地未找到此类型配置）</div>`;
+      return;
+    }
+
+    const emptyNotice = itemsContainer.querySelector('div:not(.cfgsync-item-row)');
+    if (emptyNotice && itemsContainer.children.length === 1) {
+      emptyNotice.remove();
+    }
+
+    const currentItemUids = new Set(items.map(i => i.itemUid));
+
+    // 移除已删除的项
+    itemsContainer.querySelectorAll('.cfgsync-item-row').forEach(row => {
+      if (!currentItemUids.has(row.dataset.itemUid)) {
+        row.remove();
+      }
+    });
+
+    // 原地更新已有项，或创建新项（保持展开与位置不变）
+    for (const item of items) {
+      const binding = bindingMap.get(`${ct}:${item.itemUid}`);
+      let existingRow = itemsContainer.querySelector(`.cfgsync-item-row[data-item-uid="${item.itemUid}"]`);
+      if (existingRow) {
+        this.updateRowState(existingRow, binding);
+      } else {
+        const newRow = this.createItemRow(ct, item, binding);
+        itemsContainer.appendChild(newRow);
       }
     }
   }
@@ -229,6 +293,7 @@ export class CloudConfigPanel {
   }
 
   updateRowState(row, binding) {
+    row._binding = binding;
     const isEnabled = Boolean(binding?.enabled);
     const state = binding?.state || SyncState.DISABLED;
     const version = binding?.last_synced_version;
@@ -265,10 +330,10 @@ export class CloudConfigPanel {
       background: rgba(255, 255, 255, 0.05); gap: 8px;
     `;
 
-    let binding = initialBinding;
-    const isEnabled = Boolean(binding?.enabled);
-    const state = binding?.state || SyncState.DISABLED;
-    const version = binding?.last_synced_version;
+    row._binding = initialBinding;
+    const isEnabled = Boolean(initialBinding?.enabled);
+    const state = initialBinding?.state || SyncState.DISABLED;
+    const version = initialBinding?.last_synced_version;
 
     row.innerHTML = `
       <div style="display:flex; align-items:center; gap:10px; min-width:0; flex:1;">
@@ -293,12 +358,12 @@ export class CloudConfigPanel {
       toggle.disabled = true;
       try {
         if (toggle.checked) {
-          binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName);
+          const binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName);
           this.updateRowState(row, binding);
         } else {
           const confirmRestore = confirm(`是否在关闭同步时恢复为开启同步前的本地原始配置？\n点击【确定】恢复备份，点击【取消】保留当前配置。`);
           const bindingUid = this.storage.makeBindingUid(this.accountHandle, this.accountHandle, contentType, item.itemUid);
-          binding = await this.syncManager.disableSync(bindingUid, confirmRestore);
+          const binding = await this.syncManager.disableSync(bindingUid, confirmRestore);
           this.updateRowState(row, binding);
         }
       } catch (err) {
@@ -327,23 +392,23 @@ export class CloudConfigPanel {
           } catch {}
         }
 
-        const res = await this.syncManager.pushLocal(binding, localPayload);
+        const res = await this.syncManager.pushLocal(row._binding, localPayload);
         if (res.conflict) {
           showConflictDialog({
             displayName: item.displayName,
             serverVersion: res.serverVersion,
             onResolve: async (choice) => {
-              await this.syncManager.resolveConflict(binding, choice, localPayload);
-              this.updateRowState(row, binding);
+              await this.syncManager.resolveConflict(row._binding, choice, localPayload);
+              this.updateRowState(row, row._binding);
             },
           });
         } else {
-          this.updateRowState(row, binding);
+          this.updateRowState(row, row._binding);
         }
       } catch (e) {
         alert(`推送失败: ${e.message}`);
       } finally {
-        pushBtn.disabled = !binding?.enabled;
+        pushBtn.disabled = !row._binding?.enabled;
         pushBtn.textContent = origText;
       }
     };
@@ -355,16 +420,44 @@ export class CloudConfigPanel {
       const origText = pullBtn.textContent;
       pullBtn.textContent = '拉取中...';
       try {
-        await this.syncManager.pullCloud(binding);
-        this.updateRowState(row, binding);
+        await this.syncManager.pullCloud(row._binding);
+        this.updateRowState(row, row._binding);
       } catch (e) {
         alert(`拉取失败: ${e.message}`);
       } finally {
-        pullBtn.disabled = !binding?.enabled;
+        pullBtn.disabled = !row._binding?.enabled;
         pullBtn.textContent = origText;
       }
     };
 
     return row;
+  }
+
+  renderServerErrorNotice() {
+    this.container.innerHTML = `
+      <div style="box-sizing: border-box; width: 100%; background: #1c181a; border: 1px solid rgba(255, 77, 79, 0.4); border-left: 4px solid #ff4d4f; border-radius: 6px; padding: 12px; margin: 4px 0; color: #f5f5f5;">
+        <div style="color: #ff4d4f; font-weight: 600; font-size: 13px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+          <span>⚠️</span> 服务端插件未就绪
+        </div>
+        <div style="font-size: 12px; line-height: 1.6; margin-bottom: 8px; color: #d0d0d0;">
+          当前仅加载了前端扩展，SillyTavern 后端尚未激活插件路由。请按以下步骤启用：
+        </div>
+        <ol style="font-size: 12px; line-height: 1.8; margin: 0 0 10px 18px; padding: 0; color: #c5c5c5;">
+          <li>将本仓库移动或软链接到 <code>SillyTavern/plugins/cfgsync</code>；</li>
+          <li>在 <code>config.yaml</code> 中确认 <code>enableServerPlugins: true</code>；</li>
+          <li>重启 SillyTavern 服务端。</li>
+        </ol>
+        <button class="menu_button cfgsync-retry-btn" style="width: 100%; padding: 6px; font-size: 12px; cursor: pointer;">
+          🔄 重新检测服务状态
+        </button>
+      </div>
+    `;
+    const retryBtn = this.container.querySelector('.cfgsync-retry-btn');
+    if (retryBtn) {
+      retryBtn.onclick = () => {
+        this.container.innerHTML = '';
+        this.refresh();
+      };
+    }
   }
 }

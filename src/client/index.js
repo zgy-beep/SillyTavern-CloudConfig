@@ -42,8 +42,8 @@ export async function initExtension() {
 
   // 4. 启动后台增量轮询
   poller.start();
-  poller.onUpdate(() => {
-    panel.refresh();
+  poller.onUpdate((events) => {
+    panel.handlePollerUpdate(events);
   });
 
   // 4. 注册并挂载到 ST 扩展设置侧边栏抽屉 (#extensions_settings)
