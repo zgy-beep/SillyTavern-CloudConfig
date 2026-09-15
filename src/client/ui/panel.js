@@ -485,6 +485,25 @@ export class CloudConfigPanel {
         const res = await this.syncManager.pullCloud(row._binding);
         row._existsLocally = true;
         this.updateRowState(row, row._binding, row._cloudItem, true);
+
+        // 如果拉取的是设置，同步更新前端内存中的 settings 状态
+        if (contentType === 'settings' && typeof window !== 'undefined' && res.content) {
+          try {
+            if (window.settings && typeof window.settings === 'object') {
+              Object.assign(window.settings, res.content);
+            }
+            if (window.SillyTavern?.getContext?.()?.settings) {
+              Object.assign(window.SillyTavern.getContext().settings, res.content);
+            }
+          } catch {}
+        }
+
+        const shouldReload = confirm(
+          `拉取成功！已将【${item.displayName}】同步并保存到当前账号（${this.accountHandle}）的本地目录中。\n\n是否立即刷新页面让酒馆完整应用新配置？`
+        );
+        if (shouldReload) {
+          window.location.reload();
+        }
       } catch (e) {
         alert(`拉取失败: ${e.message}`);
       } finally {
