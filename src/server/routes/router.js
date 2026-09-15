@@ -42,6 +42,7 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
         [ContentTypeGroup.P2]: ['background', 'avatar', 'sprites', 'theme', 'workflow'],
       },
       activeTypes: Array.from(adapters.keys()),
+      current_user: req.authContext.handle,
     });
   });
 
@@ -60,14 +61,14 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
       return res.status(400).json({ error: 'BadRequest', message: `Unsupported content_type: ${contentType}` });
     }
 
-    if (!authService.can(Permission.READ, req.authContext.handle, owner, contentType)) {
-      return res.status(403).json({ error: 'Forbidden', message: 'No read permission on requested target' });
-    }
-
-    if (scope === 'local' && owner === req.authContext.handle) {
-      // 发现本地 ST 目录下的对象
+    if (scope === 'local') {
+      // 发现本地 ST 目录下的对象（始终使用当前用户的真实数据目录）
       const localItems = await adapter.listItems(req.authContext.directories);
       return res.json({ items: localItems });
+    }
+
+    if (!authService.can(Permission.READ, req.authContext.handle, owner, contentType)) {
+      return res.status(403).json({ error: 'Forbidden', message: 'No read permission on requested target' });
     }
 
     // 查询云端记录

@@ -28,6 +28,12 @@ export class ClientPoller {
     }
   }
 
+  setAccountHandle(handle) {
+    if (handle && this.accountHandle !== handle) {
+      this.accountHandle = handle;
+    }
+  }
+
   onUpdate(cb) {
     this.onUpdateCallbacks.add(cb);
     return () => this.onUpdateCallbacks.delete(cb);

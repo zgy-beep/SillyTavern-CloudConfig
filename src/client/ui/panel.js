@@ -11,12 +11,14 @@ export class CloudConfigPanel {
    * @param {import('../syncManager.js').ClientSyncManager} context.syncManager
    * @param {import('../db/idb.js').IdbStorage} context.storage
    * @param {string} context.accountHandle
+   * @param {(newHandle: string) => void} [context.onAccountChange]
    */
-  constructor({ api, syncManager, storage, accountHandle }) {
+  constructor({ api, syncManager, storage, accountHandle, onAccountChange }) {
     this.api = api;
     this.syncManager = syncManager;
     this.storage = storage;
     this.accountHandle = accountHandle;
+    this.onAccountChange = onAccountChange;
     this.container = null;
   }
 
@@ -32,7 +34,7 @@ export class CloudConfigPanel {
       <div class="cfgsync-panel-container" style="padding: 10px 4px; font-family: sans-serif;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:6px; border-bottom: 1px solid rgba(255,255,255,0.08);">
           <span style="font-size:12px; font-weight:600; opacity:0.9;">云端配置项</span>
-          <span style="font-size:12px; opacity:0.8;">账号: <strong>${this.accountHandle}</strong></span>
+          <span style="font-size:12px; opacity:0.8;">账号: <strong class="cfgsync-account-label">${this.accountHandle}</strong></span>
         </div>
         <div id="cfgsync-items-loading" style="text-align:center; padding:16px; font-size:12px; opacity:0.7;">正在加载同步配置...</div>
         <div id="cfgsync-items-tree"></div>
@@ -41,6 +43,15 @@ export class CloudConfigPanel {
 
     try {
       const typeRes = await this.api.getContentTypes();
+      if (typeRes.current_user && this.accountHandle !== typeRes.current_user) {
+        this.accountHandle = typeRes.current_user;
+        const labelEl = this.container.querySelector('.cfgsync-account-label');
+        if (labelEl) labelEl.textContent = this.accountHandle;
+        if (typeof this.onAccountChange === 'function') {
+          this.onAccountChange(this.accountHandle);
+        }
+      }
+
       const p0Types = typeRes.groups?.P0 || [];
       const bindings = await this.storage.getBindingsByAccount(this.accountHandle);
       const bindingMap = new Map(bindings.map(b => [`${b.content_type}:${b.item_uid}`, b]));
@@ -48,10 +59,20 @@ export class CloudConfigPanel {
       const treeEl = this.container.querySelector('#cfgsync-items-tree');
       this.container.querySelector('#cfgsync-items-loading').style.display = 'none';
 
+      const ctNameMap = {
+        'settings': '通用设置 (Settings)',
+        'openai_preset': 'OpenAI 预设 (Presets)',
+        'textgen_preset': 'TextGen 预设 (Presets)',
+        'novel_preset': 'NovelAI 预设 (Presets)',
+        'kobold_preset': 'KoboldAI 预设 (Presets)',
+        'world': '世界设定 / 规则书 (World Info)',
+      };
+
       for (const ct of p0Types) {
         const groupEl = document.createElement('div');
         groupEl.style.cssText = 'margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px;';
-        groupEl.innerHTML = `<h4 style="margin:0 0 10px 0; text-transform: capitalize; color: #1890ff;">${ct}</h4>`;
+        const displayTypeName = ctNameMap[ct] || ct;
+        groupEl.innerHTML = `<h4 style="margin:0 0 10px 0; font-size:13px; font-weight:600; color: #1890ff;">${displayTypeName}</h4>`;
 
         // 读取本地可同步对象
         const localRes = await this.api.getItems(ct, this.accountHandle, 'local').catch(() => ({ items: [] }));

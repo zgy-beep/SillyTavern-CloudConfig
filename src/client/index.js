@@ -10,28 +10,37 @@ import { CloudConfigPanel } from './ui/panel.js';
 export async function initExtension() {
   console.log('[SillyTavern-CloudConfig] Client extension initializing...');
 
-  // 1. 获取当前登录账号 Handle
-  let accountHandle = 'default';
-  try {
-    // ST 经典全局上下文
-    if (window.SillyTavern?.getContext) {
-      const ctx = window.SillyTavern.getContext();
-      accountHandle = ctx?.userId || ctx?.user?.profile?.handle || 'default';
-    }
-  } catch {
-    accountHandle = 'default';
-  }
-
-  // 2. 初始化各核心客户端模块
+  // 1. 初始化存储与 API
   const api = new CloudConfigApi();
   const storage = new IdbStorage();
   await storage.open();
 
+  // 2. 获取当前登录账号 Handle（优先直接同步后端鉴权标识）
+  let accountHandle = 'default-user';
+  try {
+    const typeRes = await api.getContentTypes().catch(() => null);
+    if (typeRes?.current_user) {
+      accountHandle = typeRes.current_user;
+    } else if (window.SillyTavern?.getContext) {
+      const ctx = window.SillyTavern.getContext();
+      accountHandle = ctx?.userId || ctx?.user?.profile?.handle || 'default-user';
+    }
+  } catch {
+    accountHandle = 'default-user';
+  }
+
+  // 3. 初始化各核心客户端模块
   const syncManager = new ClientSyncManager(api, storage);
   const poller = new ClientPoller(api, storage, accountHandle);
-  const panel = new CloudConfigPanel({ api, syncManager, storage, accountHandle });
+  const panel = new CloudConfigPanel({
+    api,
+    syncManager,
+    storage,
+    accountHandle,
+    onAccountChange: (newHandle) => poller.setAccountHandle(newHandle),
+  });
 
-  // 3. 启动后台增量轮询
+  // 4. 启动后台增量轮询
   poller.start();
   poller.onUpdate(() => {
     panel.refresh();

@@ -12,7 +12,7 @@ export class AuthContext {
       throw new Error('Invalid AuthContext: handle is required and must be a string');
     }
     this.handle = handle;
-    this.directories = directories || {};
+    this.directories = { ...(directories || {}), handle };
     this.rawProfile = rawProfile;
   }
 

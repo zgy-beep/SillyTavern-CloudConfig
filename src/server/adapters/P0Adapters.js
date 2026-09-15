@@ -12,13 +12,31 @@ export class SettingsAdapter extends JsonConfigAdapter {
     super('settings');
   }
 
-  getFilePath(directories) {
-    const baseDir = directories?.user || directories?.root || '.';
-    return path.join(baseDir, 'settings.json');
+  async getFilePath(directories) {
+    const candidates = [
+      directories?.root ? path.join(directories.root, 'settings.json') : null,
+      directories?.user ? path.join(directories.user, 'settings.json') : null,
+      directories?.user ? path.join(path.dirname(directories.user), 'settings.json') : null,
+      path.join(process.cwd(), 'data', 'default-user', 'settings.json'),
+      path.join(process.cwd(), 'data', 'default', 'settings.json'),
+      path.join(process.cwd(), 'public', 'settings.json'),
+      path.join(process.cwd(), 'settings.json'),
+    ];
+
+    for (const p of candidates) {
+      if (p) {
+        const exists = await fs.access(p).then(() => true).catch(() => false);
+        if (exists) return p;
+      }
+    }
+
+    return directories?.root
+      ? path.join(directories.root, 'settings.json')
+      : path.join(process.cwd(), 'settings.json');
   }
 
   async listItems(directories) {
-    const filePath = this.getFilePath(directories);
+    const filePath = await this.getFilePath(directories);
     const exists = await fs.access(filePath).then(() => true).catch(() => false);
     if (!exists) {
       return [];
@@ -32,7 +50,7 @@ export class SettingsAdapter extends JsonConfigAdapter {
   }
 
   async read(directories, itemUid) {
-    const filePath = this.getFilePath(directories);
+    const filePath = await this.getFilePath(directories);
     const content = await this.safeReadJson(filePath);
     if (!content) {
       throw new Error(`Settings file not found at ${filePath}`);
@@ -41,7 +59,7 @@ export class SettingsAdapter extends JsonConfigAdapter {
   }
 
   async apply(directories, itemUid, operation, content) {
-    const filePath = this.getFilePath(directories);
+    const filePath = await this.getFilePath(directories);
     if (operation === 'UPSERT') {
       await this.safeWriteJson(filePath, content);
     } else if (operation === 'DELETE') {
@@ -60,43 +78,53 @@ export class SettingsAdapter extends JsonConfigAdapter {
 export class DirectoryJsonConfigAdapter extends JsonConfigAdapter {
   /**
    * @param {string} contentType
-   * @param {(directories: any) => string} getDirPath
+   * @param {(directories: any) => string[]} getCandidateDirs
    * @param {string} reloadStrategy
    */
-  constructor(contentType, getDirPath, reloadStrategy) {
+  constructor(contentType, getCandidateDirs, reloadStrategy) {
     super(contentType);
-    this.getDirPath = getDirPath;
+    this.getCandidateDirs = getCandidateDirs;
     this.reloadStrategy = reloadStrategy;
   }
 
-  async ensureDir(directories) {
-    const dir = this.getDirPath(directories);
-    await fs.mkdir(dir, { recursive: true });
-    return dir;
+  async getPrimaryDir(directories) {
+    const candidates = this.getCandidateDirs(directories);
+    for (const dir of candidates) {
+      if (dir && await fs.access(dir).then(() => true).catch(() => false)) {
+        return dir;
+      }
+    }
+    const primary = candidates[0] || path.join(directories?.root || '.', this.contentType);
+    await fs.mkdir(primary, { recursive: true });
+    return primary;
   }
 
   async listItems(directories) {
-    const dir = this.getDirPath(directories);
-    let files = [];
-    try {
-      files = await fs.readdir(dir);
-    } catch (err) {
-      if (err.code === 'ENOENT') {
-        return [];
-      }
-      throw err;
-    }
-
+    const candidates = this.getCandidateDirs(directories);
+    const seenFiles = new Set();
     const items = [];
-    for (const file of files) {
-      if (file.endsWith('.json')) {
-        const sourceRef = file;
-        const displayName = path.basename(file, '.json');
-        items.push({
-          itemUid: makeItemUid(this.contentType, sourceRef),
-          displayName,
-          sourceRef,
-        });
+
+    for (const dir of candidates) {
+      if (!dir) continue;
+      let files = [];
+      try {
+        files = await fs.readdir(dir);
+      } catch {
+        continue;
+      }
+
+      for (const file of files) {
+        if (file.endsWith('.json') && !seenFiles.has(file)) {
+          seenFiles.add(file);
+          const sourceRef = file;
+          const displayName = path.basename(file, '.json');
+          items.push({
+            itemUid: makeItemUid(this.contentType, sourceRef),
+            displayName,
+            sourceRef,
+            actualDir: dir,
+          });
+        }
       }
     }
     return items;
@@ -107,7 +135,11 @@ export class DirectoryJsonConfigAdapter extends JsonConfigAdapter {
     if (!item) {
       throw new Error(`Item ${itemUid} not found for type ${this.contentType}`);
     }
-    const dir = this.getDirPath(directories);
+    if (item.actualDir) {
+      return path.join(item.actualDir, item.sourceRef);
+    }
+    const candidates = this.getCandidateDirs(directories);
+    const dir = candidates[0] || path.join(directories?.root || '.', this.contentType);
     return path.join(dir, item.sourceRef);
   }
 
@@ -122,17 +154,16 @@ export class DirectoryJsonConfigAdapter extends JsonConfigAdapter {
   }
 
   async apply(directories, itemUid, operation, content) {
-    const dir = await this.ensureDir(directories);
+    const primaryDir = await this.getPrimaryDir(directories);
     const items = await this.listItems(directories);
     const existing = items.find(i => i.itemUid === itemUid);
 
-    // 若本地文件尚不存在，由内容或 itemUid 默认命名
     let targetFileName = existing ? existing.sourceRef : null;
     if (!targetFileName) {
       const name = content?.name || content?.displayName || `cfg_${itemUid.slice(0, 8)}`;
       targetFileName = `${name.replace(/[\\/:*?"<>|]/g, '_')}.json`;
     }
-    const filePath = path.join(dir, targetFileName);
+    const filePath = path.join(existing?.actualDir || primaryDir, targetFileName);
 
     if (operation === 'UPSERT') {
       await this.safeWriteJson(filePath, content);
@@ -155,39 +186,115 @@ export function createP0Adapters() {
   // Settings
   adapters.set('settings', new SettingsAdapter());
 
-  // Presets
-  const presetTypes = [
-    { type: 'openai_preset', subDir: 'openai' },
-    { type: 'textgen_preset', subDir: 'textgen' },
-    { type: 'novel_preset', subDir: 'novel' },
-    { type: 'kobold_preset', subDir: 'kobold' },
-  ];
+  // OpenAI Presets
+  adapters.set(
+    'openai_preset',
+    new DirectoryJsonConfigAdapter(
+      'openai_preset',
+      (dirs) => [
+        dirs?.openAI_Settings,
+        dirs?.['OpenAI Settings'],
+        dirs?.root ? path.join(dirs.root, 'OpenAI Settings') : null,
+        dirs?.user ? path.join(dirs.user, 'OpenAI Settings') : null,
+        dirs?.user ? path.join(path.dirname(dirs.user), 'OpenAI Settings') : null,
+        path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'OpenAI Settings'),
+        path.join(process.cwd(), 'data', 'default-user', 'OpenAI Settings'),
+        path.join(process.cwd(), 'data', 'default', 'OpenAI Settings'),
+        path.join(process.cwd(), 'public', 'OpenAI Settings'),
+        path.join(process.cwd(), 'default', 'OpenAI Settings'),
+        path.join(process.cwd(), 'public', 'presets', 'openai'),
+        path.join(process.cwd(), 'default', 'content', 'presets', 'openai'),
+      ].filter(Boolean),
+      ReloadStrategy.PRESET_LIST
+    )
+  );
 
-  for (const { type, subDir } of presetTypes) {
-    adapters.set(
-      type,
-      new DirectoryJsonConfigAdapter(
-        type,
-        (dirs) => {
-          if (dirs?.[type]) return dirs[type];
-          const base = dirs?.user || dirs?.root || '.';
-          return path.join(base, 'presets', subDir);
-        },
-        ReloadStrategy.PRESET_LIST
-      )
-    );
-  }
+  // TextGen Presets
+  adapters.set(
+    'textgen_preset',
+    new DirectoryJsonConfigAdapter(
+      'textgen_preset',
+      (dirs) => [
+        dirs?.textGen_Settings,
+        dirs?.['TextGen Settings'],
+        dirs?.root ? path.join(dirs.root, 'TextGen Settings') : null,
+        dirs?.user ? path.join(dirs.user, 'TextGen Settings') : null,
+        dirs?.user ? path.join(path.dirname(dirs.user), 'TextGen Settings') : null,
+        path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'TextGen Settings'),
+        path.join(process.cwd(), 'data', 'default-user', 'TextGen Settings'),
+        path.join(process.cwd(), 'data', 'default', 'TextGen Settings'),
+        path.join(process.cwd(), 'public', 'TextGen Settings'),
+        path.join(process.cwd(), 'default', 'TextGen Settings'),
+        path.join(process.cwd(), 'public', 'presets', 'textgen'),
+        path.join(process.cwd(), 'default', 'content', 'presets', 'textgen'),
+      ].filter(Boolean),
+      ReloadStrategy.PRESET_LIST
+    )
+  );
+
+  // NovelAI Presets
+  adapters.set(
+    'novel_preset',
+    new DirectoryJsonConfigAdapter(
+      'novel_preset',
+      (dirs) => [
+        dirs?.novelAI_Settings,
+        dirs?.['NovelAI Settings'],
+        dirs?.root ? path.join(dirs.root, 'NovelAI Settings') : null,
+        dirs?.user ? path.join(dirs.user, 'NovelAI Settings') : null,
+        dirs?.user ? path.join(path.dirname(dirs.user), 'NovelAI Settings') : null,
+        path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'NovelAI Settings'),
+        path.join(process.cwd(), 'data', 'default-user', 'NovelAI Settings'),
+        path.join(process.cwd(), 'data', 'default', 'NovelAI Settings'),
+        path.join(process.cwd(), 'public', 'NovelAI Settings'),
+        path.join(process.cwd(), 'default', 'NovelAI Settings'),
+        path.join(process.cwd(), 'public', 'presets', 'novel'),
+        path.join(process.cwd(), 'default', 'content', 'presets', 'novel'),
+      ].filter(Boolean),
+      ReloadStrategy.PRESET_LIST
+    )
+  );
+
+  // KoboldAI Presets
+  adapters.set(
+    'kobold_preset',
+    new DirectoryJsonConfigAdapter(
+      'kobold_preset',
+      (dirs) => [
+        dirs?.koboldAI_Settings,
+        dirs?.['KoboldAI Settings'],
+        dirs?.root ? path.join(dirs.root, 'KoboldAI Settings') : null,
+        dirs?.user ? path.join(dirs.user, 'KoboldAI Settings') : null,
+        dirs?.user ? path.join(path.dirname(dirs.user), 'KoboldAI Settings') : null,
+        path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'KoboldAI Settings'),
+        path.join(process.cwd(), 'data', 'default-user', 'KoboldAI Settings'),
+        path.join(process.cwd(), 'data', 'default', 'KoboldAI Settings'),
+        path.join(process.cwd(), 'public', 'KoboldAI Settings'),
+        path.join(process.cwd(), 'default', 'KoboldAI Settings'),
+        path.join(process.cwd(), 'public', 'presets', 'kobold'),
+        path.join(process.cwd(), 'default', 'content', 'presets', 'kobold'),
+      ].filter(Boolean),
+      ReloadStrategy.PRESET_LIST
+    )
+  );
 
   // World Info
   adapters.set(
     'world',
     new DirectoryJsonConfigAdapter(
       'world',
-      (dirs) => {
-        if (dirs?.worlds) return dirs.worlds;
-        const base = dirs?.user || dirs?.root || '.';
-        return path.join(base, 'worlds');
-      },
+      (dirs) => [
+        dirs?.worlds,
+        dirs?.root ? path.join(dirs.root, 'worlds') : null,
+        dirs?.user ? path.join(dirs.user, 'worlds') : null,
+        dirs?.user ? path.join(path.dirname(dirs.user), 'worlds') : null,
+        path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'worlds'),
+        path.join(process.cwd(), 'data', 'default-user', 'worlds'),
+        path.join(process.cwd(), 'data', 'default', 'worlds'),
+        path.join(process.cwd(), 'public', 'worlds'),
+        path.join(process.cwd(), 'default', 'worlds'),
+        path.join(process.cwd(), 'default', 'content', 'worlds'),
+      ].filter(Boolean),
       ReloadStrategy.WORLD_INFO
     )
   );

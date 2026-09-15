@@ -50,12 +50,13 @@ test('Integration: Express Router Endpoints', async (t) => {
 
   const itemUid = makeItemUid('settings', 'settings.json');
 
-  await t.test('1. GET /content-types returns groups and active types', async () => {
+  await t.test('1. GET /content-types returns groups, active types and current_user', async () => {
     const res = await fetch(`${baseUrl}/content-types`);
     assert.equal(res.status, 200);
     const data = await res.json();
     assert.ok(data.groups.P0.includes('settings'));
     assert.ok(data.activeTypes.includes('settings'));
+    assert.equal(data.current_user, 'alice');
   });
 
   await t.test('2. 401 Unauthorized when auth session is missing', async () => {
@@ -122,6 +123,16 @@ test('Integration: Express Router Endpoints', async (t) => {
     const data = await res.json();
     assert.equal(data.versions.length, 1);
     assert.equal(data.versions[0].version, 1);
+  });
+
+  await t.test('7. GET /items?scope=local discovers local items from directories', async () => {
+    await fs.writeFile(path.join(tempDir, 'settings.json'), JSON.stringify({ theme: 'dark' }), 'utf-8');
+    const res = await fetch(`${baseUrl}/items?content_type=settings&scope=local`);
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.ok(Array.isArray(data.items));
+    assert.equal(data.items.length, 1);
+    assert.equal(data.items[0].sourceRef, 'settings.json');
   });
 
   // 关闭服务
