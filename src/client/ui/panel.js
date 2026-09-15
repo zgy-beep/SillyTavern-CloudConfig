@@ -317,13 +317,23 @@ export class CloudConfigPanel {
       const origText = pushBtn.textContent;
       pushBtn.textContent = '推送中...';
       try {
-        const res = await this.syncManager.pushLocal(binding, null);
+        let localPayload = null;
+        if (contentType === 'settings' && typeof window !== 'undefined') {
+          try {
+            const s = window.settings || window.SillyTavern?.getContext?.()?.settings;
+            if (s && typeof s === 'object' && Object.keys(s).length > 0) {
+              localPayload = JSON.parse(JSON.stringify(s));
+            }
+          } catch {}
+        }
+
+        const res = await this.syncManager.pushLocal(binding, localPayload);
         if (res.conflict) {
           showConflictDialog({
             displayName: item.displayName,
             serverVersion: res.serverVersion,
             onResolve: async (choice) => {
-              await this.syncManager.resolveConflict(binding, choice, null);
+              await this.syncManager.resolveConflict(binding, choice, localPayload);
               this.updateRowState(row, binding);
             },
           });

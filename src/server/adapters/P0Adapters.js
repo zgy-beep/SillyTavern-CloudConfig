@@ -17,6 +17,8 @@ export class SettingsAdapter extends JsonConfigAdapter {
       directories?.root ? path.join(directories.root, 'settings.json') : null,
       directories?.user ? path.join(directories.user, 'settings.json') : null,
       directories?.user ? path.join(path.dirname(directories.user), 'settings.json') : null,
+      directories?.handle ? path.join(process.cwd(), 'data', directories.handle, 'settings.json') : null,
+      path.join(process.cwd(), 'data', directories?.handle || 'default-user', 'settings.json'),
       path.join(process.cwd(), 'data', 'default-user', 'settings.json'),
       path.join(process.cwd(), 'data', 'default', 'settings.json'),
       path.join(process.cwd(), 'public', 'settings.json'),
