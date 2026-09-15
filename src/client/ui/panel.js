@@ -34,20 +34,23 @@ export class CloudConfigPanel {
     const expandedCategories = new Set();
     this.container.querySelectorAll('.cfgsync-group-drawer').forEach(drawer => {
       const ct = drawer.dataset.contentType;
-      const content = drawer.querySelector('.inline-drawer-content');
-      if (ct && content && content.style.display !== 'none' && getComputedStyle(content).display !== 'none') {
+      const content = drawer.querySelector('.cfgsync-drawer-content');
+      if (ct && content && content.style.display === 'block') {
         expandedCategories.add(ct);
       }
     });
 
     this.container.innerHTML = `
       <div class="cfgsync-panel-container" style="padding: 6px 2px; font-family: sans-serif;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:6px; border-bottom: 1px solid rgba(255,255,255,0.08);">
-          <div style="display:flex; align-items:center; gap:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:6px; border-bottom: 1px solid rgba(255,255,255,0.08); gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
             <span style="font-size:12px; font-weight:600; opacity:0.9;">云端配置项</span>
-            <button id="cfgsync-toggle-all-btn" class="menu_button" style="font-size:11px; padding:2px 8px; cursor:pointer;">全部展开</button>
+            <button id="cfgsync-toggle-all-btn" type="button" style="display:inline-flex; align-items:center; gap:4px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:24px; padding:0 10px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#69c0ff; background:rgba(24,144,255,0.15); border:1px solid rgba(24,144,255,0.35); cursor:pointer; user-select:none;">
+              <i class="fa-solid fa-angles-down" style="font-size:10px;"></i>
+              <span class="cfgsync-toggle-all-text">全部展开</span>
+            </button>
           </div>
-          <span style="font-size:12px; opacity:0.8;">账号: <strong class="cfgsync-account-label">${this.accountHandle}</strong></span>
+          <span style="font-size:12px; opacity:0.8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">账号: <strong class="cfgsync-account-label">${this.accountHandle}</strong></span>
         </div>
         <div id="cfgsync-items-loading" style="text-align:center; padding:16px; font-size:12px; opacity:0.7;">正在加载同步配置...</div>
         <div id="cfgsync-items-tree"></div>
@@ -84,30 +87,28 @@ export class CloudConfigPanel {
       const toggleAllBtn = this.container.querySelector('#cfgsync-toggle-all-btn');
       let allExpanded = false;
       if (toggleAllBtn) {
-        toggleAllBtn.onclick = () => {
+        toggleAllBtn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
           allExpanded = !allExpanded;
-          toggleAllBtn.textContent = allExpanded ? '全部折叠' : '全部展开';
+          const textSpan = toggleAllBtn.querySelector('.cfgsync-toggle-all-text');
+          const iconI = toggleAllBtn.querySelector('i');
+          if (textSpan) textSpan.textContent = allExpanded ? '全部折叠' : '全部展开';
+          if (iconI) {
+            iconI.className = allExpanded ? 'fa-solid fa-angles-up' : 'fa-solid fa-angles-down';
+          }
           const groupDrawers = treeEl.querySelectorAll('.cfgsync-group-drawer');
           groupDrawers.forEach(drawer => {
-            const content = drawer.querySelector('.inline-drawer-content');
+            const content = drawer.querySelector('.cfgsync-drawer-content');
             const icon = drawer.querySelector('.inline-drawer-icon');
-            if (allExpanded) {
-              if (window.$) {
-                $(content).stop().slideDown(150);
-              } else {
-                content.style.display = 'block';
-              }
-              if (icon) {
+            if (content) {
+              content.style.display = allExpanded ? 'block' : 'none';
+            }
+            if (icon) {
+              if (allExpanded) {
                 icon.classList.remove('down');
                 icon.classList.add('up');
-              }
-            } else {
-              if (window.$) {
-                $(content).stop().slideUp(150);
               } else {
-                content.style.display = 'none';
-              }
-              if (icon) {
                 icon.classList.remove('up');
                 icon.classList.add('down');
               }
@@ -126,23 +127,23 @@ export class CloudConfigPanel {
         const isExpanded = expandedCategories.has(ct);
 
         const groupDrawer = document.createElement('div');
-        groupDrawer.className = 'inline-drawer cfgsync-group-drawer';
+        groupDrawer.className = 'cfgsync-group-drawer';
         groupDrawer.dataset.contentType = ct;
-        groupDrawer.style.cssText = 'margin-bottom: 8px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; overflow: hidden;';
+        groupDrawer.style.cssText = 'margin-bottom: 8px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; overflow: hidden; background: rgba(0, 0, 0, 0.1);';
 
         const countBadge = items.length > 0
           ? `<span style="font-size: 11px; padding: 1px 7px; border-radius: 10px; background: rgba(24, 144, 255, 0.2); color: #69c0ff; font-weight: normal;">${items.length}</span>`
           : `<span style="font-size: 11px; padding: 1px 7px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); opacity: 0.5; font-weight: normal;">0</span>`;
 
         groupDrawer.innerHTML = `
-          <div class="inline-drawer-toggle inline-drawer-header" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: rgba(255, 255, 255, 0.03); user-select: none;">
+          <div class="inline-drawer-header cfgsync-drawer-toggle" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: rgba(255, 255, 255, 0.03); user-select: none; transition: background 0.15s ease;">
             <div style="display: flex; align-items: center; gap: 8px;">
               <b style="font-size: 13px; color: #1890ff;">${displayTypeName}</b>
               ${countBadge}
             </div>
-            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down ${isExpanded ? 'up' : 'down'}"></div>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down ${isExpanded ? 'up' : 'down'}" style="transition: transform 0.15s ease-in-out; font-size: 14px;"></div>
           </div>
-          <div class="inline-drawer-content" style="display: ${isExpanded ? 'block' : 'none'}; padding: 6px 8px;">
+          <div class="cfgsync-drawer-content" style="display: ${isExpanded ? 'block' : 'none'}; padding: 6px 8px;">
             <div class="cfgsync-group-items"></div>
           </div>
         `;
@@ -159,18 +160,27 @@ export class CloudConfigPanel {
           }
         }
 
-        // 针对无 jQuery 环境做原生兼容点击
-        if (!window.$) {
-          const toggleBtn = groupDrawer.querySelector('.inline-drawer-toggle');
-          const contentEl = groupDrawer.querySelector('.inline-drawer-content');
-          const iconEl = groupDrawer.querySelector('.inline-drawer-icon');
-          toggleBtn.addEventListener('click', () => {
-            const isHidden = contentEl.style.display === 'none';
-            contentEl.style.display = isHidden ? 'block' : 'none';
-            iconEl.classList.toggle('down', !isHidden);
-            iconEl.classList.toggle('up', isHidden);
-          });
-        }
+        // 高性能瞬时原生切换，杜绝 jQuery 逐帧高度计算导致的掉帧与高度截断异常
+        const toggleBtn = groupDrawer.querySelector('.cfgsync-drawer-toggle');
+        const contentEl = groupDrawer.querySelector('.cfgsync-drawer-content');
+        const iconEl = groupDrawer.querySelector('.inline-drawer-icon');
+
+        toggleBtn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const isHidden = contentEl.style.display === 'none';
+          contentEl.style.display = isHidden ? 'block' : 'none';
+          if (isHidden) {
+            iconEl.classList.remove('down');
+            iconEl.classList.add('up');
+          } else {
+            iconEl.classList.remove('up');
+            iconEl.classList.add('down');
+          }
+        };
+
+        toggleBtn.onmouseenter = () => { toggleBtn.style.background = 'rgba(255, 255, 255, 0.06)'; };
+        toggleBtn.onmouseleave = () => { toggleBtn.style.background = 'rgba(255, 255, 255, 0.03)'; };
 
         treeEl.appendChild(groupDrawer);
       }
@@ -209,34 +219,34 @@ export class CloudConfigPanel {
     row.style.cssText = `
       display: flex; align-items: center; justify-content: space-between;
       padding: 8px 12px; margin-bottom: 6px; border-radius: 4px;
-      background: rgba(255, 255, 255, 0.05);
+      background: rgba(255, 255, 255, 0.05); gap: 8px;
     `;
 
     const isEnabled = Boolean(binding?.enabled);
     const state = binding?.state || SyncState.DISABLED;
     const version = binding?.last_synced_version ? `v${binding.last_synced_version}` : '本地版';
 
-    let stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#555; color:#fff;">未同步</span>`;
+    let stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#555; color:#fff; white-space:nowrap;">未同步</span>`;
     if (state === SyncState.SYNCED) {
-      stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#52c41a; color:#fff;">已同步 (${version})</span>`;
+      stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#52c41a; color:#fff; white-space:nowrap;">已同步 (${version})</span>`;
     } else if (state === SyncState.CONFLICT) {
-      stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#f5222d; color:#fff;">⚠️ 冲突</span>`;
+      stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#f5222d; color:#fff; white-space:nowrap;">⚠️ 冲突</span>`;
     } else if (state === SyncState.BACKUP_CREATED) {
-      stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#1890ff; color:#fff;">冷备份就绪</span>`;
+      stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#1890ff; color:#fff; white-space:nowrap;">冷备份就绪</span>`;
     }
 
     row.innerHTML = `
-      <div style="display:flex; align-items:center; gap:10px;">
-        <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} style="cursor:pointer;" />
-        <div>
-          <div style="font-size:14px; font-weight:500;">${item.displayName}</div>
-          <div style="font-size:11px; opacity:0.6;">${item.sourceRef}</div>
+      <div style="display:flex; align-items:center; gap:10px; min-width:0; flex:1;">
+        <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} style="cursor:pointer; flex-shrink:0;" />
+        <div style="min-width:0; overflow:hidden;">
+          <div style="font-size:13px; font-weight:500; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${item.displayName}</div>
+          <div style="font-size:11px; opacity:0.6; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${item.sourceRef}</div>
         </div>
       </div>
-      <div style="display:flex; align-items:center; gap:8px;">
+      <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
         ${stateBadge}
-        <button class="cfgsync-push-btn menu_button" style="padding:4px 8px; font-size:12px; cursor:pointer;" ${!isEnabled ? 'disabled' : ''}>推云端</button>
-        <button class="cfgsync-pull-btn menu_button" style="padding:4px 8px; font-size:12px; cursor:pointer;" ${!isEnabled ? 'disabled' : ''}>拉云端</button>
+        <button class="cfgsync-push-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${!isEnabled ? 'disabled' : ''}>推云端</button>
+        <button class="cfgsync-pull-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${!isEnabled ? 'disabled' : ''}>拉云端</button>
       </div>
     `;
 
