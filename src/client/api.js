@@ -6,10 +6,42 @@ export class CloudConfigApi {
     this.baseUrl = baseUrl;
   }
 
+  async getHeaders() {
+    let stHeaders = {};
+    if (typeof window !== 'undefined') {
+      if (typeof window.getRequestHeaders === 'function') {
+        try {
+          stHeaders = window.getRequestHeaders();
+        } catch {}
+      } else if (window.SillyTavern?.getContext?.()?.getRequestHeaders) {
+        try {
+          stHeaders = window.SillyTavern.getContext().getRequestHeaders();
+        } catch {}
+      } else {
+        try {
+          const utils = await import('/scripts/utils.js').catch(() => null);
+          if (utils && typeof utils.getRequestHeaders === 'function') {
+            stHeaders = utils.getRequestHeaders();
+          }
+        } catch {}
+      }
+
+      if (!stHeaders['X-CSRF-Token'] && !stHeaders['x-csrf-token']) {
+        const metaCsrf = typeof document !== 'undefined' && document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+        if (metaCsrf) {
+          stHeaders['X-CSRF-Token'] = metaCsrf;
+        }
+      }
+    }
+    return stHeaders;
+  }
+
   async request(endpoint, options = {}) {
     const url = `${this.baseUrl}${endpoint}`;
+    const stHeaders = await this.getHeaders();
     const headers = {
       'Content-Type': 'application/json',
+      ...stHeaders,
       ...options.headers,
     };
 
@@ -43,13 +75,14 @@ export class CloudConfigApi {
     return this.request(`/items?${params.toString()}`);
   }
 
-  async pull(contentType, itemUid, owner = '', version = null) {
+  async pull(contentType, itemUid, owner = '', version = null, apply = false) {
     const params = new URLSearchParams({
       content_type: contentType,
       item_uid: itemUid,
     });
     if (owner) params.append('owner', owner);
     if (version) params.append('version', String(version));
+    if (apply) params.append('apply', 'true');
     return this.request(`/pull?${params.toString()}`);
   }
 

@@ -214,26 +214,61 @@ export class CloudConfigPanel {
     }
   }
 
-  createItemRow(contentType, item, binding) {
+  renderBadgeHtml(state, version) {
+    if (state === SyncState.SYNCED) {
+      const vText = version ? `v${version}` : '本地版';
+      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#52c41a; color:#fff; white-space:nowrap;">已同步 (${vText})</span>`;
+    }
+    if (state === SyncState.CONFLICT) {
+      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#f5222d; color:#fff; white-space:nowrap;">⚠️ 冲突</span>`;
+    }
+    if (state === SyncState.BACKUP_CREATED) {
+      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#1890ff; color:#fff; white-space:nowrap;">冷备份就绪</span>`;
+    }
+    return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#555; color:#fff; white-space:nowrap;">未同步</span>`;
+  }
+
+  updateRowState(row, binding) {
+    const isEnabled = Boolean(binding?.enabled);
+    const state = binding?.state || SyncState.DISABLED;
+    const version = binding?.last_synced_version;
+
+    const badgeContainer = row.querySelector('.cfgsync-state-badge-container');
+    if (badgeContainer) {
+      badgeContainer.innerHTML = this.renderBadgeHtml(state, version);
+    }
+
+    const pushBtn = row.querySelector('.cfgsync-push-btn');
+    if (pushBtn) {
+      pushBtn.disabled = !isEnabled;
+    }
+
+    const pullBtn = row.querySelector('.cfgsync-pull-btn');
+    if (pullBtn) {
+      pullBtn.disabled = !isEnabled;
+    }
+
+    const toggle = row.querySelector('.cfgsync-toggle');
+    if (toggle && toggle.checked !== isEnabled) {
+      toggle.checked = isEnabled;
+    }
+  }
+
+  createItemRow(contentType, item, initialBinding) {
     const row = document.createElement('div');
+    row.className = 'cfgsync-item-row';
+    row.dataset.itemUid = item.itemUid;
+    row.dataset.contentType = contentType;
     row.style.cssText = `
       display: flex; align-items: center; justify-content: space-between;
       padding: 8px 12px; margin-bottom: 6px; border-radius: 4px;
       background: rgba(255, 255, 255, 0.05); gap: 8px;
     `;
 
+    let binding = initialBinding;
     const isEnabled = Boolean(binding?.enabled);
     const state = binding?.state || SyncState.DISABLED;
-    const version = binding?.last_synced_version ? `v${binding.last_synced_version}` : '本地版';
-
-    let stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#555; color:#fff; white-space:nowrap;">未同步</span>`;
-    if (state === SyncState.SYNCED) {
-      stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#52c41a; color:#fff; white-space:nowrap;">已同步 (${version})</span>`;
-    } else if (state === SyncState.CONFLICT) {
-      stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#f5222d; color:#fff; white-space:nowrap;">⚠️ 冲突</span>`;
-    } else if (state === SyncState.BACKUP_CREATED) {
-      stateBadge = `<span style="font-size:11px; padding:2px 6px; border-radius:3px; background:#1890ff; color:#fff; white-space:nowrap;">冷备份就绪</span>`;
-    }
+    const version = binding?.last_synced_version;
 
     row.innerHTML = `
       <div style="display:flex; align-items:center; gap:10px; min-width:0; flex:1;">
@@ -244,23 +279,34 @@ export class CloudConfigPanel {
         </div>
       </div>
       <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-        ${stateBadge}
+        <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center;">
+          ${this.renderBadgeHtml(state, version)}
+        </div>
         <button class="cfgsync-push-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${!isEnabled ? 'disabled' : ''}>推云端</button>
         <button class="cfgsync-pull-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${!isEnabled ? 'disabled' : ''}>拉云端</button>
       </div>
     `;
 
-    // 勾选切换开关
+    // 勾选切换开关（原地更新，绝不全量重建，彻底杜绝抖动）
     const toggle = row.querySelector('.cfgsync-toggle');
     toggle.onchange = async () => {
-      if (toggle.checked) {
-        await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName);
-        this.refresh();
-      } else {
-        const confirmRestore = confirm(`是否在关闭同步时恢复为开启同步前的本地原始配置？\n点击【确定】恢复备份，点击【取消】保留当前配置。`);
-        const bindingUid = this.storage.makeBindingUid(this.accountHandle, this.accountHandle, contentType, item.itemUid);
-        await this.syncManager.disableSync(bindingUid, confirmRestore);
-        this.refresh();
+      toggle.disabled = true;
+      try {
+        if (toggle.checked) {
+          binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName);
+          this.updateRowState(row, binding);
+        } else {
+          const confirmRestore = confirm(`是否在关闭同步时恢复为开启同步前的本地原始配置？\n点击【确定】恢复备份，点击【取消】保留当前配置。`);
+          const bindingUid = this.storage.makeBindingUid(this.accountHandle, this.accountHandle, contentType, item.itemUid);
+          binding = await this.syncManager.disableSync(bindingUid, confirmRestore);
+          this.updateRowState(row, binding);
+        }
+      } catch (err) {
+        console.error('[cfgsync] toggle error:', err);
+        toggle.checked = !toggle.checked;
+        alert(`切换状态失败: ${err.message}`);
+      } finally {
+        toggle.disabled = false;
       }
     };
 
@@ -268,25 +314,27 @@ export class CloudConfigPanel {
     const pushBtn = row.querySelector('.cfgsync-push-btn');
     pushBtn.onclick = async () => {
       pushBtn.disabled = true;
+      const origText = pushBtn.textContent;
+      pushBtn.textContent = '推送中...';
       try {
-        const pullRes = await this.api.pull(contentType, item.itemUid, this.accountHandle).catch(() => null);
-        const res = await this.syncManager.pushLocal(binding, pullRes?.content || {});
+        const res = await this.syncManager.pushLocal(binding, null);
         if (res.conflict) {
           showConflictDialog({
             displayName: item.displayName,
             serverVersion: res.serverVersion,
             onResolve: async (choice) => {
-              await this.syncManager.resolveConflict(binding, choice, pullRes?.content || {});
-              this.refresh();
+              await this.syncManager.resolveConflict(binding, choice, null);
+              this.updateRowState(row, binding);
             },
           });
         } else {
-          this.refresh();
+          this.updateRowState(row, binding);
         }
       } catch (e) {
         alert(`推送失败: ${e.message}`);
       } finally {
-        pushBtn.disabled = false;
+        pushBtn.disabled = !binding?.enabled;
+        pushBtn.textContent = origText;
       }
     };
 
@@ -294,13 +342,16 @@ export class CloudConfigPanel {
     const pullBtn = row.querySelector('.cfgsync-pull-btn');
     pullBtn.onclick = async () => {
       pullBtn.disabled = true;
+      const origText = pullBtn.textContent;
+      pullBtn.textContent = '拉取中...';
       try {
         await this.syncManager.pullCloud(binding);
-        this.refresh();
+        this.updateRowState(row, binding);
       } catch (e) {
         alert(`拉取失败: ${e.message}`);
       } finally {
-        pullBtn.disabled = false;
+        pullBtn.disabled = !binding?.enabled;
+        pullBtn.textContent = origText;
       }
     };
 

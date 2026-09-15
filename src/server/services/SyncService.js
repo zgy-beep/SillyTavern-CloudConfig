@@ -175,6 +175,17 @@ export class SyncService {
 
     // 2. 数据校验与序列化
     if (operation === OperationType.UPSERT) {
+      // 若客户端未提供 payload（例如直接在面板触发推送到云端），则由适配器从本地真实文件读取
+      if (payload === null || payload === undefined || (typeof payload === 'object' && Object.keys(payload).length === 0)) {
+        try {
+          payload = await adapter.read(authContext.directories, itemUid);
+        } catch (readErr) {
+          if (!payload || (typeof payload === 'object' && Object.keys(payload).length === 0)) {
+            throw new BadRequestError(`No payload provided and failed to read local file: ${readErr.message}`);
+          }
+        }
+      }
+
       if (!adapter.validate(payload)) {
         throw new BadRequestError(`Invalid payload for content_type: ${contentType}`);
       }

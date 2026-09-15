@@ -135,6 +135,42 @@ test('Integration: Express Router Endpoints', async (t) => {
     assert.equal(data.items[0].sourceRef, 'settings.json');
   });
 
+  await t.test('8. POST /push with null payload reads local file directly', async () => {
+    // 写入本地新配置
+    await fs.writeFile(path.join(tempDir, 'settings.json'), JSON.stringify({ theme: 'nordic', fontSize: 16 }), 'utf-8');
+    const pushRes = await fetch(`${baseUrl}/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'settings',
+        item_uid: itemUid,
+        base_version: 1,
+        operation: 'UPSERT',
+        payload: null,
+      }),
+    });
+    assert.equal(pushRes.status, 200);
+    const pushData = await pushRes.json();
+    assert.equal(pushData.version, 2);
+
+    const pullRes = await fetch(`${baseUrl}/pull?content_type=settings&item_uid=${itemUid}`);
+    const pullData = await pullRes.json();
+    assert.equal(pullData.version, 2);
+    assert.equal(pullData.content.theme, 'nordic');
+    assert.equal(pullData.content.fontSize, 16);
+  });
+
+  await t.test('9. GET /pull?apply=true writes content to local disk', async () => {
+    // 显式拉取 version 1 并应用到本地
+    const pullRes = await fetch(`${baseUrl}/pull?content_type=settings&item_uid=${itemUid}&version=1&apply=true`);
+    assert.equal(pullRes.status, 200);
+
+    // 检查本地文件是否被更新为 version 1 的内容
+    const diskContent = JSON.parse(await fs.readFile(path.join(tempDir, 'settings.json'), 'utf-8'));
+    assert.equal(diskContent.theme, 'dark');
+    assert.equal(diskContent.fontSize, 14);
+  });
+
   // 关闭服务
   server.close();
   dbClient.close();

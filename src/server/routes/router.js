@@ -97,9 +97,9 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
     });
   }));
 
-  // 3. GET /pull?content_type=&item_uid=&owner=&version=
+  // 3. GET /pull?content_type=&item_uid=&owner=&version=&apply=
   router.get('/pull', asyncHandler(async (req, res) => {
-    const { content_type: contentType, item_uid: itemUid } = req.query;
+    const { content_type: contentType, item_uid: itemUid, apply: shouldApply } = req.query;
     const owner = req.query.owner || req.authContext.handle;
     const targetVersion = req.query.version ? Number(req.query.version) : null;
 
@@ -108,6 +108,12 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
     }
 
     const result = await syncService.pull(req.authContext, owner, contentType, itemUid, targetVersion);
+    if (shouldApply === 'true' || shouldApply === true) {
+      const adapter = adapters.get(contentType);
+      if (adapter) {
+        await adapter.apply(req.authContext.directories, itemUid, 'UPSERT', result.content);
+      }
+    }
     res.json(result);
   }));
 
