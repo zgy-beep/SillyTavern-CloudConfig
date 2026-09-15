@@ -29,12 +29,12 @@ export class CloudConfigPanel {
     if (!this.container) return;
 
     this.container.innerHTML = `
-      <div class="cfgsync-panel-container" style="padding: 16px; font-family: sans-serif;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-          <h3 style="margin:0;">☁️ 配置云同步</h3>
-          <span style="font-size:12px; opacity:0.8;">当前账号: <strong>${this.accountHandle}</strong></span>
+      <div class="cfgsync-panel-container" style="padding: 10px 4px; font-family: sans-serif;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:6px; border-bottom: 1px solid rgba(255,255,255,0.08);">
+          <span style="font-size:12px; font-weight:600; opacity:0.9;">云端配置项</span>
+          <span style="font-size:12px; opacity:0.8;">账号: <strong>${this.accountHandle}</strong></span>
         </div>
-        <div id="cfgsync-items-loading" style="text-align:center; padding:20px;">正在加载同步配置...</div>
+        <div id="cfgsync-items-loading" style="text-align:center; padding:16px; font-size:12px; opacity:0.7;">正在加载同步配置...</div>
         <div id="cfgsync-items-tree"></div>
       </div>
     `;
@@ -72,12 +72,14 @@ export class CloudConfigPanel {
     } catch (err) {
       if (err.status === 404 || err.message?.includes('404')) {
         this.container.innerHTML = `
-          <div style="background: rgba(255, 77, 79, 0.1); border: 1px solid #ff4d4f; border-radius: 6px; padding: 16px; margin: 12px 0;">
-            <h4 style="color:#ff4d4f; margin-top:0;">⚠️ 服务端插件未就绪</h4>
-            <p style="font-size:13px; line-height:1.6; margin-bottom:8px;">
+          <div style="background: var(--SmartThemeBodyColor, #20232a); border: 1px solid #ff4d4f; border-radius: 6px; padding: 14px; margin: 6px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
+            <h4 style="color:#ff4d4f; margin-top:0; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+              <span>⚠️</span> 服务端插件未就绪
+            </h4>
+            <p style="font-size:12px; line-height:1.6; margin-bottom:8px; color: var(--SmartThemeQuoteColor, #ddd);">
               当前仅加载了前端扩展，SillyTavern 后端尚未激活插件路由。请检查以下配置：
             </p>
-            <ol style="font-size:12px; line-height:1.8; margin:0 0 10px 20px; padding:0;">
+            <ol style="font-size:12px; line-height:1.8; margin:0 0 10px 18px; padding:0; color: var(--SmartThemeQuoteColor, #ccc);">
               <li>本仓库需放置或软链接到 SillyTavern 的 <code>plugins/cfgsync</code> 目录；</li>
               <li>在 <code>config.yaml</code> 中确认已开启 <code>enableServerPlugins: true</code>；</li>
               <li>重启 SillyTavern 服务端。</li>

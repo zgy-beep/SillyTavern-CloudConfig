@@ -37,19 +37,47 @@ export async function initExtension() {
     panel.refresh();
   });
 
-  // 4. 注册 ST 侧边栏/抽屉入口按钮（如果存在对应容器）
-  const drawer = document.querySelector('#extensions_settings');
-  if (drawer) {
-    const section = document.createElement('div');
-    section.className = 'extension_settings_section';
-    section.innerHTML = `
-      <div class="title_restorable">
-        <h4>☁️ 配置云同步</h4>
+  // 4. 注册并挂载到 ST 扩展设置侧边栏抽屉 (#extensions_settings)
+  const mountDrawer = () => {
+    if (document.querySelector('#cfgsync-drawer-container')) return true;
+    const drawer = document.querySelector('#extensions_settings');
+    if (!drawer) return false;
+
+    const drawerContainer = document.createElement('div');
+    drawerContainer.id = 'cfgsync-drawer-container';
+    drawerContainer.className = 'inline-drawer';
+    drawerContainer.innerHTML = `
+      <div class="inline-drawer-toggle inline-drawer-header">
+        <b>☁️ 配置云同步</b>
+        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
       </div>
-      <div id="cfgsync-panel-root"></div>
+      <div class="inline-drawer-content" style="display: none;">
+        <div id="cfgsync-panel-root"></div>
+      </div>
     `;
-    drawer.appendChild(section);
-    panel.render(section.querySelector('#cfgsync-panel-root'));
+
+    // 兼容非 jQuery 环境下的原生切换
+    if (!window.$) {
+      const toggleBtn = drawerContainer.querySelector('.inline-drawer-toggle');
+      const contentEl = drawerContainer.querySelector('.inline-drawer-content');
+      const iconEl = drawerContainer.querySelector('.inline-drawer-icon');
+      toggleBtn.addEventListener('click', () => {
+        const isHidden = contentEl.style.display === 'none';
+        contentEl.style.display = isHidden ? 'block' : 'none';
+        iconEl.classList.toggle('down', !isHidden);
+        iconEl.classList.toggle('up', isHidden);
+      });
+    }
+
+    drawer.appendChild(drawerContainer);
+    panel.render(drawerContainer.querySelector('#cfgsync-panel-root'));
+    return true;
+  };
+
+  if (!mountDrawer()) {
+    const timer = setInterval(() => {
+      if (mountDrawer()) clearInterval(timer);
+    }, 500);
   }
 
   console.log('[SillyTavern-CloudConfig] Client extension initialized for account:', accountHandle);
