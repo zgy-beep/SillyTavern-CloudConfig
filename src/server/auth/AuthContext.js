@@ -17,6 +17,13 @@ export class AuthContext {
   }
 
   /**
+   * 是否为管理员账号 (ST profile.admin === true)
+   */
+  get isAdmin() {
+    return Boolean(this.rawProfile?.admin);
+  }
+
+  /**
    * 从 Express Request 中提取 AuthContext
    * 严格对接 ST 多用户模式结构：req.user = { profile: { handle: '...' }, directories: { ... } }
    * @param {any} req Express Request

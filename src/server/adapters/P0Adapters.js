@@ -91,20 +91,49 @@ export async function autoBackupLocalFile(filePath) {
 }
 
 /**
+ * 获取用户的主数据根目录（兼容 SillyTavern 单用户及多用户模式）
+ * 在 ST 多用户模式下：directories.user 指向 <accountRoot>/user，而 secrets.json 和 settings.json 位于 <accountRoot>
+ */
+export function getUserAccountRoot(directories) {
+  if (directories?.root && fsSync.existsSync(path.join(directories.root, 'settings.json'))) {
+    return directories.root;
+  }
+  if (directories?.user) {
+    if (path.basename(directories.user) === 'user') {
+      return path.dirname(directories.user);
+    }
+    return directories.user;
+  }
+  if (directories?.root) {
+    return directories.root;
+  }
+  const userHandle = directories?.handle || 'default-user';
+  return path.join(process.cwd(), 'data', userHandle);
+}
+
+/**
  * 方案 B 密钥注入：从服务端 sourceOwner 的 secrets.json 中读取并安全注水到目标用户
  */
 export async function injectSecrets(sourceOwnerHandle, targetDirectories, audit = null) {
   try {
-    const parentDir = targetDirectories?.user ? path.dirname(targetDirectories.user) : null;
-    const rootDir = targetDirectories?.root || process.cwd();
+    const targetAccountRoot = getUserAccountRoot(targetDirectories);
+    const targetUserHandle = targetDirectories?.handle || 'default-user';
+
+    // 确定源用户的 secrets.json 查找路径
+    const targetParentDir = path.dirname(targetAccountRoot);
+    const rootDir = targetDirectories?.root ? path.dirname(targetDirectories.root) : process.cwd();
+
     const sourceSecretsCandidates = [
-      parentDir ? path.join(parentDir, sourceOwnerHandle, 'secrets.json') : null,
-      parentDir ? path.join(parentDir, `user_${sourceOwnerHandle}`, 'secrets.json') : null,
+      path.join(targetParentDir, sourceOwnerHandle, 'secrets.json'),
+      path.join(targetParentDir, `user_${sourceOwnerHandle}`, 'secrets.json'),
+      targetDirectories?.root ? path.join(targetDirectories.root, '..', sourceOwnerHandle, 'secrets.json') : null,
+      targetDirectories?.root ? path.join(targetDirectories.root, sourceOwnerHandle, 'secrets.json') : null,
       path.join(rootDir, 'data', sourceOwnerHandle, 'secrets.json'),
       path.join(rootDir, 'data', `user_${sourceOwnerHandle}`, 'secrets.json'),
       path.join(process.cwd(), 'data', sourceOwnerHandle, 'secrets.json'),
       path.join(process.cwd(), 'secrets.json'),
     ].filter(Boolean);
+
     let sourceSecrets = null;
     for (const p of sourceSecretsCandidates) {
       try {
@@ -115,10 +144,9 @@ export async function injectSecrets(sourceOwnerHandle, targetDirectories, audit 
     }
     if (!sourceSecrets) return;
 
-    const targetUserHandle = targetDirectories?.handle || 'default-user';
-    const targetDir = targetDirectories?.user || path.join(process.cwd(), 'data', targetUserHandle);
-    await fs.mkdir(targetDir, { recursive: true });
-    const targetSecretsPath = path.join(targetDir, 'secrets.json');
+    // 目标用户的 secrets.json 必须写入到 accountRoot/secrets.json
+    await fs.mkdir(targetAccountRoot, { recursive: true });
+    const targetSecretsPath = path.join(targetAccountRoot, 'secrets.json');
 
     let targetSecrets = {};
     try {
@@ -142,6 +170,14 @@ export async function injectSecrets(sourceOwnerHandle, targetDirectories, audit 
     const tmpPath = `${targetSecretsPath}.${Date.now()}.tmp`;
     await fs.writeFile(tmpPath, JSON.stringify(merged, null, 2), 'utf8');
     await fs.rename(tmpPath, targetSecretsPath);
+
+    // 清理可能误写在 targetDirectories.user/secrets.json 的残留文件（防御性清理）
+    if (targetDirectories?.user && path.resolve(targetDirectories.user) !== path.resolve(targetAccountRoot)) {
+      const straySecretsPath = path.join(targetDirectories.user, 'secrets.json');
+      try {
+        await fs.unlink(straySecretsPath);
+      } catch {}
+    }
 
     if (audit) {
       audit.log({
@@ -170,20 +206,17 @@ export class SettingsAdapter extends JsonConfigAdapter {
    * 获取当前请求用户自身专有的 settings.json 主路径（写入时严格使用此路径）
    */
   getUserPrimaryPath(directories) {
-    if (directories?.user && fsSync.existsSync(path.join(directories.user, 'settings.json'))) {
-      return path.join(directories.user, 'settings.json');
+    const accountRoot = getUserAccountRoot(directories);
+    if (fsSync.existsSync(path.join(accountRoot, 'settings.json'))) {
+      return path.join(accountRoot, 'settings.json');
     }
     if (directories?.root && fsSync.existsSync(path.join(directories.root, 'settings.json'))) {
       return path.join(directories.root, 'settings.json');
     }
-    if (directories?.user) {
+    if (directories?.user && fsSync.existsSync(path.join(directories.user, 'settings.json'))) {
       return path.join(directories.user, 'settings.json');
     }
-    if (directories?.root) {
-      return path.join(directories.root, 'settings.json');
-    }
-    const userHandle = directories?.handle || 'default-user';
-    return path.join(process.cwd(), 'data', userHandle, 'settings.json');
+    return path.join(accountRoot, 'settings.json');
   }
 
   async getFilePath(directories) {
@@ -192,9 +225,11 @@ export class SettingsAdapter extends JsonConfigAdapter {
       return primary;
     }
 
+    const accountRoot = getUserAccountRoot(directories);
     const userHandle = directories?.handle || 'default-user';
     const candidates = [
       primary,
+      path.join(accountRoot, 'settings.json'),
       directories?.root ? path.join(directories.root, 'settings.json') : null,
       directories?.user ? path.join(directories.user, 'settings.json') : null,
       path.join(process.cwd(), 'data', userHandle, 'settings.json'),

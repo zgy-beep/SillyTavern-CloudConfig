@@ -17,7 +17,7 @@ import { createPluginRouter } from '../../src/server/routes/router.js';
 import { AuthContext } from '../../src/server/auth/AuthContext.js';
 import { makeItemUid } from '../../src/common/utils.js';
 
-test('Integration: Phase 3 Home Settings Sharing & Direct Snapshot Upload (25 Cases)', async (t) => {
+test('Integration: Phase 3 Home Settings Sharing & Direct Snapshot Upload (26 Cases)', async (t) => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cfgsync_p3_test_'));
   const aliceDir = path.join(tempDir, 'user_alice');
   const bobDir = path.join(tempDir, 'user_bob');
@@ -48,12 +48,13 @@ test('Integration: Phase 3 Home Settings Sharing & Direct Snapshot Upload (25 Ca
 
   let currentUser = 'alice';
   let currentUserDir = aliceDir;
+  let currentUserAdmin = false;
 
   const app = express();
   app.use(express.json());
   app.use((req, res, next) => {
     req.user = {
-      profile: { handle: currentUser },
+      profile: { handle: currentUser, admin: currentUserAdmin },
       directories: { user: currentUserDir, root: tempDir, handle: currentUser },
     };
     next();
@@ -527,13 +528,26 @@ test('Integration: Phase 3 Home Settings Sharing & Direct Snapshot Upload (25 Ca
     assert.ok(vData.versions[0].size_bytes > 0);
   });
 
-  // TC24: GET /config returns current config; POST /config updates config dynamically
-  await t.test('TC24: GET /config returns current config; POST /config updates config dynamically', async () => {
+  // TC24: GET /config returns current config; POST /config requires admin (403 for non-admin, 200 for admin)
+  await t.test('TC24: GET /config returns current config; POST /config requires admin', async () => {
     const getRes = await fetch(`${baseUrl}/config`);
     assert.equal(getRes.status, 200);
     const getData = await getRes.json();
     assert.equal(getData.config.allowSettingsSharing, true);
 
+    // 非管理员尝试更新配置，必须返回 403 Forbidden
+    currentUserAdmin = false;
+    const forbiddenRes = await fetch(`${baseUrl}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxVersions: 50 }),
+    });
+    assert.equal(forbiddenRes.status, 403);
+    const forbiddenData = await forbiddenRes.json();
+    assert.match(forbiddenData.message, /Administrator privileges required/i);
+
+    // 管理员更新配置，成功返回 200 并动态生效
+    currentUserAdmin = true;
     const postRes = await fetch(`${baseUrl}/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -545,6 +559,7 @@ test('Integration: Phase 3 Home Settings Sharing & Direct Snapshot Upload (25 Ca
     const postData = await postRes.json();
     assert.equal(postData.config.maxVersions, 50);
     assert.equal(configService.get('maxVersions'), 50);
+    currentUserAdmin = false;
   });
 
   // TC25: ChangeEventBus filters out settings when allowSettingsSharing = false, and allows when true
@@ -558,5 +573,42 @@ test('Integration: Phase 3 Home Settings Sharing & Direct Snapshot Upload (25 Ca
     changeBus.recordEvent('alice', 'settings', settingsUid, 2, 'UPSERT');
     res = changeBus.getChanges('bob', 0);
     assert.equal(res.events.filter(e => e.content_type === 'settings').length, 1);
+  });
+
+  // TC26: SillyTavern multi-user mode: directories.user = <accountRoot>/user, secrets.json written to <accountRoot>/secrets.json & stray cleaned
+  await t.test('TC26: Multi-user mode writes secrets.json to account root and cleans stray user/secrets.json', async () => {
+    // 准备 Charlie 用户目录（模拟 ST 多用户目录结构：root = data/charlie, user = data/charlie/user）
+    const charlieRoot = path.join(tempDir, 'charlie');
+    const charlieUserDir = path.join(charlieRoot, 'user');
+    await fs.mkdir(charlieUserDir, { recursive: true });
+
+    // 故意在 charlieUserDir 中遗留一份 stray secrets.json（模拟旧版本 bug 产生的残留文件）
+    const straySecretsPath = path.join(charlieUserDir, 'secrets.json');
+    await fs.writeFile(straySecretsPath, JSON.stringify({ stray: true }), 'utf-8');
+
+    const charlieDirs = {
+      root: charlieRoot,
+      user: charlieUserDir,
+      handle: 'charlie',
+    };
+
+    const settingsAdapter = adapters.get('settings');
+    const primarySettings = settingsAdapter.getUserPrimaryPath(charlieDirs);
+    assert.equal(primarySettings, path.join(charlieRoot, 'settings.json'), 'Settings 主路径应为 accountRoot/settings.json');
+
+    // 触发密钥注入：将 Alice 的密钥注入给 Charlie
+    await injectSecrets('alice', charlieDirs, auditService);
+
+    // 验证正确的账号根目录 secrets.json 是否生成并注入
+    const charlieSecretsPath = path.join(charlieRoot, 'secrets.json');
+    const charlieSecretsExists = await fs.access(charlieSecretsPath).then(() => true).catch(() => false);
+    assert.ok(charlieSecretsExists, 'secrets.json 必须写入到账号根目录下');
+
+    const charlieSecrets = JSON.parse(await fs.readFile(charlieSecretsPath, 'utf-8'));
+    assert.ok(charlieSecrets.api_key_custom.some(k => k.id === 'openai_main'));
+
+    // 验证 stray secrets.json 是否被防御性清理
+    const strayStillExists = await fs.access(straySecretsPath).then(() => true).catch(() => false);
+    assert.equal(strayStillExists, false, '误写在 user/ 目录下的残留 secrets.json 必须被自动清理');
   });
 });

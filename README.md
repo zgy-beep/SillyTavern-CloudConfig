@@ -126,6 +126,11 @@ node server.js
 插件的后端核心基于原子 CAS（Compare-And-Swap）版本控制，后提交的设备不会静默覆盖前者的内容，而是会收到冲突警告并弹窗提醒用户选择处理方式。
 </details>
 
+<details>
+<summary><strong>Q: 拉取共享的通用设置（settings.json）时，如果所有者删除了某个配置项，成员本地会怎么处理？</strong></summary>
+拉取设置时采用<strong>递归深度按键合并</strong>（Deep Merge）策略：优先应用云端所有者的更新，同时严格保留成员本地独有的扩展参数与配置。如果所有者在云端删除了某项配置，该键在成员本地仍会被保留，绝不会被静默抹除。在任何写入落盘前，系统都会自动备份原文件（<code>settings.json.bak-&lt;timestamp&gt;</code>，最多轮转保留 3 份），若需完全与所有者一致，可参照备份手动微调或重置。
+</details>
+
 ---
 
 ## 📄 开源许可证

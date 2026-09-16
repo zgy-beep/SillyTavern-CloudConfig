@@ -435,6 +435,17 @@ export function createPluginRouter({
   });
 
   router.post('/config', (req, res) => {
+    const isAdmin = Boolean(
+      req.user?.profile?.admin === true ||
+      req.authContext?.rawProfile?.admin === true ||
+      req.authContext?.isAdmin === true
+    );
+    if (!isAdmin) {
+      return res.status(403).json({
+        error: 'ForbiddenError',
+        message: 'Administrator privileges required to update configuration',
+      });
+    }
     const updated = configService?.update(req.body) || {};
     res.json({ success: true, config: updated });
   });
