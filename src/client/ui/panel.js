@@ -187,19 +187,10 @@ export class CloudConfigPanel {
         }
       }
 
-      // 仅展示常用的通用配置（settings, openai_preset, world）；保留 textgen/novel/kobold 适配器代码备用
-      const defaultActiveTypes = new Set(['settings', 'openai_preset', 'world']);
-      const p0Types = (typeRes.groups?.P0 || []).filter(ct => defaultActiveTypes.has(ct));
+      // 支持所有已注册并启用的配置类型（核心类型 + P1 纯 JSON 预设）
+      const allActiveTypes = typeRes.activeTypes || (typeRes.groups?.P0 || ['settings', 'openai_preset', 'world']);
       const bindings = await this.storage.getBindingsByAccount(this.accountHandle);
       const bindingMap = new Map(bindings.map(b => [`${b.content_type}:${b.item_uid}`, b]));
-
-      // 移除未启用的抽屉分类（若此前已渲染在界面中）
-      const activeCtSet = new Set(p0Types);
-      treeEl.querySelectorAll('.cfgsync-group-drawer').forEach(drawer => {
-        if (!activeCtSet.has(drawer.dataset.contentType)) {
-          drawer.remove();
-        }
-      });
 
       const ctNameMap = {
         'settings': '通用设置',
@@ -208,9 +199,13 @@ export class CloudConfigPanel {
         'novel_preset': 'NovelAI 预设',
         'kobold_preset': 'KoboldAI 预设',
         'world': '世界设定 / 规则书',
+        'instruct': 'Instruct / 格式预设',
+        'context': 'Context / 上下文预设',
+        'sysprompt': '系统提示词预设',
+        'quick_replies': '快捷回复',
       };
 
-      for (const ct of p0Types) {
+      for (const ct of allActiveTypes) {
         // 1. 获取本地配置项
         const localRes = await this.api.getItems(ct, this.accountHandle, 'local').catch(() => ({ items: [] }));
         const localItems = localRes.items || [];
@@ -218,6 +213,14 @@ export class CloudConfigPanel {
         // 2. 获取云端全量备份（跨所有账号）
         const cloudRes = await this.api.getItems(ct, '', 'cloud', true).catch(() => ({ items: [] }));
         const cloudItems = cloudRes.items || [];
+
+        // 核心三类常驻；其余扩展类型若本地与云端均为空，则不展示空抽屉
+        const isCoreType = ct === 'settings' || ct === 'openai_preset' || ct === 'world';
+        if (!isCoreType && localItems.length === 0 && cloudItems.length === 0) {
+          const oldDrawer = treeEl.querySelector(`.cfgsync-group-drawer[data-content-type="${ct}"]`);
+          if (oldDrawer) oldDrawer.remove();
+          continue;
+        }
 
         // 3. 智能合并：既能在本地看到未同步项，也能在其它账号下看到已有云端备份
         const itemMap = new Map();
@@ -596,21 +599,35 @@ export class CloudConfigPanel {
       row.style.borderLeft = '3px solid rgba(255, 255, 255, 0.2)';
     }
 
-    // 2. 状态徽章与选择器
+    // 1.5 动态更新左侧图标与文件名状态
+    const rowIcon = row.querySelector('.cfgsync-row-icon');
+    if (rowIcon) {
+      rowIcon.className = `cfgsync-row-icon ${hasCloud ? 'fa-solid fa-cloud' : 'fa-regular fa-file'}`;
+      rowIcon.style.color = hasCloud ? '#58a6ff' : 'rgba(255,255,255,0.3)';
+    }
+    const rowName = row.querySelector('.cfgsync-row-name');
+    if (rowName && rowName.parentElement) {
+      rowName.parentElement.style.fontWeight = hasCloud ? '600' : '400';
+      rowName.parentElement.style.color = hasCloud ? '#f0f6fc' : '#c9d1d9';
+    }
+    const rowRef = row.querySelector('.cfgsync-row-ref');
+    if (rowRef) {
+      const baseRef = rowRef.dataset.sourceRef || rowRef.title || '';
+      rowRef.textContent = `${baseRef}${!hasCloud ? ' · 仅本地' : ''}`;
+      rowRef.style.color = hasCloud ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)';
+    }
+
+    // 2. 状态徽章与选择器 (确保每次更新都重新挂载最新云端版本，并重置懒加载监听)
     const badgeContainer = row.querySelector('.cfgsync-state-badge-container');
     if (badgeContainer) {
-      const select = badgeContainer.querySelector('.cfgsync-version-select');
-      if (select && hasCloud) {
-        select.style.borderColor = `${info.color}88`;
-      } else if (hasCloud) {
-        badgeContainer.innerHTML = this.renderVersionSelectorHtml(state, version, cItem, binding);
+      badgeContainer.innerHTML = this.renderVersionSelectorHtml(state, version, hasCloud ? cItem : null, binding);
+      if (hasCloud) {
         const newSelect = badgeContainer.querySelector('.cfgsync-version-select');
         if (newSelect) {
+          row._versionsLoaded = false;
           newSelect.addEventListener('focus', () => this.loadVersionOptions(row), { once: true });
           newSelect.addEventListener('mousedown', () => this.loadVersionOptions(row), { once: true });
         }
-      } else {
-        badgeContainer.innerHTML = this.renderVersionSelectorHtml(state, version, null, binding);
       }
     }
 
@@ -720,10 +737,10 @@ export class CloudConfigPanel {
         <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} title="${isEnabled ? '已开启云同步 (取消勾选停用)' : (hasCloud ? '勾选开启自动同步' : '未同步：勾选后可在推送时自动关联同步')}" style="cursor:pointer; flex-shrink:0; width:15px; height:15px; margin:0; accent-color:#1890ff;" />
         <div style="min-width:0; flex:1; overflow:hidden; display:flex; flex-direction:column; gap:1px;">
           <div title="${item.displayName}" style="font-size:12.5px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? '#f0f6fc' : '#c9d1d9'}; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:flex; align-items:center; gap:5px;">
-            <i class="${hasCloud ? 'fa-solid fa-cloud' : 'fa-regular fa-file'}" style="font-size:11px; color:${hasCloud ? '#58a6ff' : 'rgba(255,255,255,0.3)'}; flex-shrink:0;"></i>
-            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.displayName}</span>
+            <i class="cfgsync-row-icon ${hasCloud ? 'fa-solid fa-cloud' : 'fa-regular fa-file'}" style="font-size:11px; color:${hasCloud ? '#58a6ff' : 'rgba(255,255,255,0.3)'}; flex-shrink:0;"></i>
+            <span class="cfgsync-row-name" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.displayName}</span>
           </div>
-          <div title="${item.sourceRef}" style="font-size:10.5px; line-height:1.2; color:${hasCloud ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)'}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; padding-left: 16px;">${item.sourceRef}${!hasCloud ? ' · 仅本地' : ''}</div>
+          <div class="cfgsync-row-ref" data-source-ref="${item.sourceRef}" title="${item.sourceRef}" style="font-size:10.5px; line-height:1.2; color:${hasCloud ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)'}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; padding-left: 16px;">${item.sourceRef}${!hasCloud ? ' · 仅本地' : ''}</div>
         </div>
       </div>
       <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
@@ -855,6 +872,10 @@ export class CloudConfigPanel {
               row._existsLocally = true;
               row._versionsLoaded = false;
               await this.refresh();
+              const toastMsg = `已成功推送到云端 (v${res.version}${res.versionTitle ? ' · ' + res.versionTitle : ''})`;
+              if (typeof toastr !== 'undefined' && toastr?.success) {
+                toastr.success(toastMsg);
+              }
             }
           } catch (e) {
             alert(`推送失败: ${e.message}`);
