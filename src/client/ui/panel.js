@@ -1,4 +1,4 @@
-import { SyncState, SyncMode } from '../../common/constants.js';
+import { SyncState, SyncMode, ReloadStrategy } from '../../common/constants.js';
 import { showConflictDialog } from './conflictDialog.js';
 import { showClaimDialog, showShareDialog } from './shareDialog.js';
 import { showPushDialog } from './pushDialog.js';
@@ -539,15 +539,9 @@ export class CloudConfigPanel {
         } catch {}
       }
 
-      const versionDesc = targetVersion ? '指定快照' : '最新快照';
-      let reloadMsg = `拉取成功！已将【${item.displayName}】的 ${versionDesc} 同步并保存到当前账号（${this.accountHandle}）的本地目录中。\n\n是否立即刷新页面让酒馆完整应用新配置？`;
-      if (contentType === 'settings') {
-        reloadMsg = `拉取成功！已自动将【${item.displayName}】的 ${versionDesc} 同步并安全合并到当前账号（${this.accountHandle}）的本地配置中（已自动生成备份保护）。\n\n提示：酒馆服务在启动时会缓存全局配置与 API 密钥，若包含密钥更新，建议重启 SillyTavern 服务端以完全生效。\n\n是否立即刷新前端页面？`;
-      }
-      const shouldReload = confirm(reloadMsg);
-      if (shouldReload) {
-        window.location.reload();
-      }
+      const versionDesc = targetVersion ? `指定快照 (v${targetVersion})` : '最新快照';
+      const strategy = res?.reload_strategy || this.getDefaultReloadStrategy(contentType);
+      await this.handleReloadStrategy(strategy, item, versionDesc, this.accountHandle, res);
     } catch (e) {
       if (e.status === 423 || e.data?.code === 'LOCKED') {
         alert('【拉取已被防替换锁定保护拦截】\n\n当前配置已开启防替换锁定保护，阻止来自云端的覆盖！\n如需覆盖更新本地，请先点击行内的金色 🔒 图标解除锁定，然后再执行拉取。');
@@ -561,6 +555,115 @@ export class CloudConfigPanel {
         pullBtn.style.opacity = row._cloudItem ? '0.9' : '0.35';
       }
     }
+  }
+
+  /**
+   * 获取某类配置的默认 reload_strategy 降级
+   */
+  getDefaultReloadStrategy(contentType) {
+    if (contentType === 'character') return ReloadStrategy.CHARACTER_LIST;
+    if (contentType === 'settings') return ReloadStrategy.SETTINGS;
+    if (contentType === 'world') return ReloadStrategy.WORLD_INFO;
+    if (contentType && contentType.endsWith('_preset')) return ReloadStrategy.PRESET_LIST;
+    return ReloadStrategy.NONE;
+  }
+
+  /**
+   * 根据服务端下发的 reload_strategy 执行前端刷新或提示重启 (P5-3)
+   * @param {string} reloadStrategy
+   * @param {object} item
+   * @param {string} versionDesc
+   * @param {string} accountHandle
+   * @param {object} [res]
+   * @returns {Promise<{ strategy: string, refreshedInUi: boolean, message: string }>}
+   */
+  async handleReloadStrategy(reloadStrategy, item, versionDesc, accountHandle, res = null) {
+    const name = item.displayName || item.itemUid || '配置';
+    let refreshedInUi = false;
+    let reloadMsg = '';
+
+    switch (reloadStrategy) {
+      case ReloadStrategy.CHARACTER_LIST: {
+        // 优先尝试触发前端刷新钩子
+        try {
+          if (typeof window !== 'undefined') {
+            if (typeof window.getCharacters === 'function') {
+              await window.getCharacters();
+              refreshedInUi = true;
+            } else if (window.SillyTavern?.getContext?.()?.getCharacters) {
+              await window.SillyTavern.getContext().getCharacters();
+              refreshedInUi = true;
+            } else if (typeof window.jQuery === 'function' && window.jQuery('#character_refresh_button').length > 0) {
+              window.jQuery('#character_refresh_button').trigger('click');
+              refreshedInUi = true;
+            }
+          }
+        } catch (err) {
+          console.warn('[cfgsync] 触发角色列表前端刷新钩子异常:', err);
+        }
+
+        reloadMsg = `拉取成功！已将角色卡【${name}】的 ${versionDesc} 同步到本地。\n\n提示：SillyTavern 存在服务端内存缓存，若角色列表中未立即刷新显示该角色，请重启 SillyTavern 服务端完全生效。\n\n是否立即刷新页面？`;
+        break;
+      }
+
+      case ReloadStrategy.SETTINGS: {
+        reloadMsg = `拉取成功！已自动将【${name}】的 ${versionDesc} 同步并安全合并到当前账号（${accountHandle}）的本地配置中（已自动生成备份保护）。\n\n提示：酒馆服务在启动时会缓存全局配置与 API 密钥，若包含密钥更新，建议重启 SillyTavern 服务端以完全生效。\n\n是否立即刷新前端页面？`;
+        break;
+      }
+
+      case ReloadStrategy.PRESET_LIST: {
+        try {
+          if (typeof window !== 'undefined') {
+            if (typeof window.loadPresets === 'function') {
+              await window.loadPresets();
+              refreshedInUi = true;
+            } else if (window.SillyTavern?.getContext?.()?.loadPresets) {
+              await window.SillyTavern.getContext().loadPresets();
+              refreshedInUi = true;
+            }
+          }
+        } catch (err) {
+          console.warn('[cfgsync] 触发预设列表前端刷新钩子异常:', err);
+        }
+        reloadMsg = `拉取成功！已将预设【${name}】的 ${versionDesc} 同步到本地。\n\n是否立即刷新页面以应用新预设？`;
+        break;
+      }
+
+      case ReloadStrategy.WORLD_INFO: {
+        try {
+          if (typeof window !== 'undefined') {
+            if (typeof window.loadWorldInfo === 'function') {
+              await window.loadWorldInfo();
+              refreshedInUi = true;
+            } else if (window.SillyTavern?.getContext?.()?.loadWorldInfo) {
+              await window.SillyTavern.getContext().loadWorldInfo();
+              refreshedInUi = true;
+            }
+          }
+        } catch (err) {
+          console.warn('[cfgsync] 触发世界书前端刷新钩子异常:', err);
+        }
+        reloadMsg = `拉取成功！已将世界书【${name}】的 ${versionDesc} 同步到本地。\n\n是否立即刷新页面以应用？`;
+        break;
+      }
+
+      case ReloadStrategy.BACKGROUND_CACHE: {
+        reloadMsg = `拉取成功！已将背景【${name}】的 ${versionDesc} 同步到本地。\n\n是否立即刷新页面以更新背景缓存？`;
+        break;
+      }
+
+      default: {
+        reloadMsg = `拉取成功！已将【${name}】的 ${versionDesc} 同步并保存到当前账号（${accountHandle}）的本地目录中。\n\n是否立即刷新页面让酒馆完整应用新配置？`;
+        break;
+      }
+    }
+
+    const shouldReload = (typeof confirm === 'function') ? confirm(reloadMsg) : false;
+    if (shouldReload && typeof window !== 'undefined' && window.location?.reload) {
+      window.location.reload();
+    }
+
+    return { strategy: reloadStrategy, refreshedInUi, message: reloadMsg };
   }
 
   updateRowState(row, binding, cloudItem = null, existsLocally = true) {
