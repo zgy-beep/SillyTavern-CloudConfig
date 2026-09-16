@@ -3,6 +3,7 @@ import { AuthContext } from '../auth/AuthContext.js';
 import { P0ContentTypes, ContentTypeGroup, Permission } from '../../common/constants.js';
 import { ShareService } from '../services/ShareService.js';
 import { AuditService } from '../services/AuditService.js';
+import { SseService } from '../services/SseService.js';
 
 /**
  * 创建 Express 路由
@@ -13,6 +14,7 @@ import { AuditService } from '../services/AuditService.js';
  * @param {Map<string, import('../adapters/ConfigAdapter.js').ConfigAdapter>} context.adapters
  * @param {import('../services/ShareService.js').ShareService} [context.shareService]
  * @param {import('../services/AuditService.js').AuditService} [context.auditService]
+ * @param {import('../services/SseService.js').SseService} [context.sseService]
  * @returns {Router}
  */
 export function createPluginRouter({
@@ -23,10 +25,13 @@ export function createPluginRouter({
   shareService,
   auditService,
   configService,
+  sseService,
 }) {
   const router = Router();
   const audit = auditService || (syncService?.db ? new AuditService(syncService.db) : null);
   const shares = shareService || (syncService?.db && audit ? new ShareService(syncService.db, audit, configService) : null);
+  const sse = sseService || new SseService({ changeBus, authService, configService });
+  router.sseService = sse;
 
   // 统一错误包装辅助函数
   const asyncHandler = (fn) => (req, res, next) => {
@@ -46,6 +51,26 @@ export function createPluginRouter({
   };
 
   router.use(requireAuth);
+
+  // 0. GET /events (Server-Sent Events 实时事件流，P5-7, N-7, N-12, TC11)
+  router.get('/events', (req, res) => {
+    const lastEventId = req.headers['last-event-id'] || req.query.last_event_id;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    if (typeof res.flushHeaders === 'function') {
+      res.flushHeaders();
+    }
+
+    const client = sse.addClient(res, req.authContext, lastEventId);
+    req.on('close', () => {
+      sse.removeClient(client);
+    });
+  });
 
   // 1. GET /content-types
   router.get('/content-types', (req, res) => {
@@ -321,6 +346,17 @@ export function createPluginRouter({
       details: { version: result.version, operation, version_title: result.version_title },
     });
 
+    sse.broadcastEvent({
+      seq: result.seq || Date.now(),
+      owner_handle: req.authContext.handle,
+      content_type: contentType,
+      item_uid: itemUid,
+      version: result.version,
+      version_title: result.version_title,
+      operation,
+      created_at: Date.now(),
+    });
+
     res.json({
       success: true,
       ...result,
@@ -416,6 +452,16 @@ export function createPluginRouter({
       result: 'success',
       clientId,
       details: { targetVersion, newVersion: result.version },
+    });
+
+    sse.broadcastEvent({
+      seq: result.seq || Date.now(),
+      owner_handle: req.authContext.handle,
+      content_type: contentType,
+      item_uid: itemUid,
+      version: result.version,
+      operation: 'ROLLBACK',
+      created_at: Date.now(),
     });
 
     res.json({
@@ -646,13 +692,22 @@ export function createPluginRouter({
 
     // 2. 删除云端备份（软删除 + 墓碑记录）
     if (shouldDeleteCloud) {
-      await syncService.push({
+      const delResult = await syncService.push({
         authContext: req.authContext,
         ownerHandle: req.authContext.handle, // 强制仅能删除自己名下的云端备份
         contentType,
         itemUid,
         operation: 'DELETE',
         force: true,
+      });
+
+      sse.broadcastEvent({
+        seq: delResult?.seq || Date.now(),
+        owner_handle: req.authContext.handle,
+        content_type: contentType,
+        item_uid: itemUid,
+        operation: 'DELETE',
+        created_at: Date.now(),
       });
     }
 

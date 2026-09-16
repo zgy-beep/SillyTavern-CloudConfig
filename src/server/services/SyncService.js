@@ -325,6 +325,7 @@ export class SyncService {
     // 执行原子事务
     let txSuccess = false;
     let committedVersion = 0;
+    let committedSeq = null;
     try {
       this.db.transaction(() => {
         if (isForce) {
@@ -397,7 +398,7 @@ export class SyncService {
         });
 
         // 插入全局变更事件
-        this.stmtInsertEvent.run({
+        const eventRes = this.stmtInsertEvent.run({
           ':owner': ownerHandle,
           ':ct': contentType,
           ':uid': itemUid,
@@ -405,6 +406,7 @@ export class SyncService {
           ':op': operation,
           ':now': now,
         });
+        committedSeq = eventRes.lastInsertRowid;
       });
 
       // 事务提交后，原子重命名临时 blob 为正式 blob
@@ -432,6 +434,7 @@ export class SyncService {
       checksum: actualChecksum,
       version_title: cleanTitle,
       size_bytes: sizeBytes,
+      seq: committedSeq,
     };
   }
 

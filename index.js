@@ -12,6 +12,7 @@ import { SyncService } from './src/server/services/SyncService.js';
 import { AuditService } from './src/server/services/AuditService.js';
 import { ShareService } from './src/server/services/ShareService.js';
 import { ConfigService } from './src/server/config/ConfigService.js';
+import { SseService } from './src/server/services/SseService.js';
 import { createPluginRouter } from './src/server/routes/router.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -56,6 +57,8 @@ export async function init(router) {
   const shareService = new ShareService(dbClient, auditService, configService);
   const syncService = new SyncService(dbClient, adapters, snapshotStore, authService, configService);
 
+  const sseService = new SseService({ changeBus, authService, configService });
+
   // 3. 挂载前端扩展静态资源目录
   const clientDir = path.join(__dirname, 'src', 'client');
   router.use('/client', express.static(clientDir));
@@ -69,6 +72,7 @@ export async function init(router) {
     shareService,
     auditService,
     configService,
+    sseService,
   });
   router.use('/', pluginRouter);
 
