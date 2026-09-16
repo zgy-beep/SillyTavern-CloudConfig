@@ -38,16 +38,19 @@ export class CloudConfigPanel {
     }
 
     this.container.innerHTML = `
-      <div class="cfgsync-panel-container" style="padding: 6px 2px; font-family: sans-serif;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:6px; border-bottom: 1px solid rgba(255,255,255,0.08); gap:8px;">
-          <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-            <span style="font-size:12px; font-weight:600; opacity:0.9;">云端配置项</span>
-            <button id="cfgsync-toggle-all-btn" type="button" style="display:inline-flex; align-items:center; gap:4px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:24px; padding:0 10px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#69c0ff; background:rgba(24,144,255,0.15); border:1px solid rgba(24,144,255,0.35); cursor:pointer; user-select:none;">
+      <div class="cfgsync-panel-container" style="padding: 4px 2px; font-family: sans-serif;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding-bottom:6px; border-bottom: 1px solid rgba(255,255,255,0.08); gap:8px;">
+          <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+            <span style="font-size:12px; font-weight:600; opacity:0.9;">云端配置</span>
+            <button id="cfgsync-toggle-all-btn" type="button" title="切换全部展开/折叠" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 8px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#69c0ff; background:rgba(24,144,255,0.12); border:1px solid rgba(24,144,255,0.3); cursor:pointer; user-select:none;">
               <i class="fa-solid fa-angles-down" style="font-size:10px;"></i>
               <span class="cfgsync-toggle-all-text">全部展开</span>
             </button>
+            <button id="cfgsync-refresh-btn" type="button" title="刷新配置状态" style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; margin:0; border-radius:4px; font-size:10px; color:#69c0ff; background:rgba(24,144,255,0.12); border:1px solid rgba(24,144,255,0.3); cursor:pointer; user-select:none;">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
           </div>
-          <span style="font-size:12px; opacity:0.8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">当前账号: <strong class="cfgsync-account-label" style="color:#69c0ff;">${this.accountHandle}</strong></span>
+          <span style="font-size:11.5px; opacity:0.75; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">账号: <strong class="cfgsync-account-label" style="color:#69c0ff;">${this.accountHandle}</strong></span>
         </div>
         <div id="cfgsync-items-loading" style="text-align:center; padding:16px; font-size:12px; opacity:0.7;">正在加载配置...</div>
         <div id="cfgsync-items-tree"></div>
@@ -55,6 +58,25 @@ export class CloudConfigPanel {
     `;
 
     this.bindToggleAll();
+    this.bindRefresh();
+  }
+
+  bindRefresh() {
+    const refreshBtn = this.container.querySelector('#cfgsync-refresh-btn');
+    if (!refreshBtn || refreshBtn.dataset.bound) return;
+    refreshBtn.dataset.bound = 'true';
+
+    refreshBtn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const icon = refreshBtn.querySelector('i');
+      if (icon) icon.classList.add('fa-spin');
+      try {
+        await this.refresh();
+      } finally {
+        if (icon) icon.classList.remove('fa-spin');
+      }
+    };
   }
 
   bindToggleAll() {
@@ -137,12 +159,12 @@ export class CloudConfigPanel {
       });
 
       const ctNameMap = {
-        'settings': '通用设置 (Settings)',
-        'openai_preset': 'OpenAI 预设 (Presets)',
-        'textgen_preset': 'TextGen 预设 (Presets)',
-        'novel_preset': 'NovelAI 预设 (Presets)',
-        'kobold_preset': 'KoboldAI 预设 (Presets)',
-        'world': '世界设定 / 规则书 (World Info)',
+        'settings': '通用设置',
+        'openai_preset': 'OpenAI 预设',
+        'textgen_preset': 'TextGen 预设',
+        'novel_preset': 'NovelAI 预设',
+        'kobold_preset': 'KoboldAI 预设',
+        'world': '世界设定 / 规则书',
       };
 
       for (const ct of p0Types) {
@@ -241,17 +263,17 @@ export class CloudConfigPanel {
     const groupDrawer = document.createElement('div');
     groupDrawer.className = 'cfgsync-group-drawer';
     groupDrawer.dataset.contentType = ct;
-    groupDrawer.style.cssText = 'margin-bottom: 8px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; overflow: hidden; background: rgba(0, 0, 0, 0.1);';
+    groupDrawer.style.cssText = 'margin-bottom: 7px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; overflow: hidden; background: rgba(0, 0, 0, 0.12);';
 
     groupDrawer.innerHTML = `
-      <div class="inline-drawer-header cfgsync-drawer-toggle" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: rgba(255, 255, 255, 0.03); user-select: none; transition: background 0.15s ease;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <b style="font-size: 13px; color: #1890ff;">${displayTypeName}</b>
-          <span class="cfgsync-count-badge" style="font-size: 11px; padding: 1px 7px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); opacity: 0.5; font-weight: normal;">0</span>
+      <div class="inline-drawer-header cfgsync-drawer-toggle" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; background: rgba(255, 255, 255, 0.03); user-select: none; transition: background 0.15s ease;">
+        <div style="display: flex; align-items: center; gap: 7px;">
+          <b style="font-size: 12.5px; color: #40a9ff;">${displayTypeName}</b>
+          <span class="cfgsync-count-badge" style="font-size: 10.5px; padding: 0 6px; height: 17px; line-height: 17px; border-radius: 9px; background: rgba(255, 255, 255, 0.08); opacity: 0.6; font-weight: 500;">0</span>
         </div>
-        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="transition: transform 0.15s ease-in-out; font-size: 14px;"></div>
+        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="transition: transform 0.15s ease-in-out; font-size: 13px; opacity: 0.7;"></div>
       </div>
-      <div class="cfgsync-drawer-content" style="display: none; padding: 6px 8px;">
+      <div class="cfgsync-drawer-content" style="display: none; padding: 5px 6px;">
         <div class="cfgsync-group-items"></div>
       </div>
     `;
@@ -336,24 +358,24 @@ export class CloudConfigPanel {
   getStateInfo(state, version, cloudItem = null, binding = null) {
     if (binding && binding.enabled && state === SyncState.SYNCED) {
       if (cloudItem && cloudItem.current_version > (binding.last_synced_version || 0)) {
-        return { color: '#faad14', label: `☁️ 云端新版 v${cloudItem.current_version}` };
+        return { color: '#faad14', label: `☁️ v${cloudItem.current_version}` };
       }
-      const vText = version ? `v${version}` : '本地版';
-      const fromText = (binding.source_owner_handle && binding.source_owner_handle !== this.accountHandle) ? ` · ${binding.source_owner_handle}` : '';
-      return { color: '#52c41a', label: `已同步 (${vText}${fromText})` };
+      const vText = version ? `v${version}` : '已同步';
+      const fromText = (binding.source_owner_handle && binding.source_owner_handle !== this.accountHandle) ? ` @${binding.source_owner_handle}` : '';
+      return { color: '#52c41a', label: `${vText}${fromText}` };
     }
     if (state === SyncState.CONFLICT) {
       return { color: '#f5222d', label: '⚠️ 冲突' };
     }
     if (state === SyncState.BACKUP_CREATED) {
-      return { color: '#1890ff', label: '冷备份就绪' };
+      return { color: '#1890ff', label: '冷备份' };
     }
     if (cloudItem) {
       const isCross = cloudItem.owner_handle && cloudItem.owner_handle !== this.accountHandle;
-      const ownerText = isCross ? ` · @${cloudItem.owner_handle}` : '';
-      return { color: '#722ed1', label: `云端就绪 (v${cloudItem.current_version}${ownerText})` };
+      const ownerText = isCross ? ` @${cloudItem.owner_handle}` : '';
+      return { color: '#722ed1', label: `v${cloudItem.current_version}${ownerText}` };
     }
-    return { color: '#666', label: '未同步' };
+    return { color: '#8c8c8c', label: '未同步' };
   }
 
   /**
@@ -377,24 +399,24 @@ export class CloudConfigPanel {
   }
 
   /**
-   * 为指定行渲染版本选择器的初始 HTML（方案 A：极简胶囊风）
+   * 为指定行渲染版本选择器的初始 HTML（方案 A：极简紧凑胶囊风）
    * @returns {string} select 或 badge 的 HTML
    */
   renderVersionSelectorHtml(state, version, cloudItem = null, binding = null) {
     const info = this.getStateInfo(state, version, cloudItem, binding);
 
-    // 云端没有任何版本时，显示精致胶囊徽章（固定高度 26px，居中对齐）
+    // 云端没有任何版本时，显示精致小胶囊徽章
     if (!cloudItem) {
-      return `<span class="cfgsync-state-badge" style="display:inline-flex; align-items:center; justify-content:center; width:100%; font-size:11px; height:26px; box-sizing:border-box; padding:0 8px; border-radius:13px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#8c8c8c; white-space:nowrap; user-select:none;">${info.label}</span>`;
+      return `<span class="cfgsync-state-badge" title="当前状态：${info.label}" style="display:inline-flex; align-items:center; justify-content:center; font-size:10.5px; height:22px; line-height:20px; box-sizing:border-box; padding:0 6px; border-radius:11px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); color:#8c8c8c; white-space:nowrap; user-select:none;">${info.label}</span>`;
     }
 
-    // 有云端版本时，显示方案 A 极简胶囊下拉选择器（固定高度 26px，占满容器宽度并居中）
+    // 有云端版本时，显示方案 A 极简胶囊下拉选择器（默认紧凑小胶囊，点击展开完整时间线）
     const currentV = cloudItem.current_version || 1;
     const isCross = cloudItem.owner_handle && cloudItem.owner_handle !== this.accountHandle;
-    const ownerSuffix = isCross ? ` · @${cloudItem.owner_handle}` : '';
-    const initialText = `☁️ v${currentV} (最新${ownerSuffix})`;
+    const ownerSuffix = isCross ? ` @${cloudItem.owner_handle}` : '';
+    const initialText = `v${currentV}${ownerSuffix}`;
 
-    return `<select class="cfgsync-version-select" style="display:inline-flex; align-items:center; width:100%; font-size:11px; font-weight:500; height:26px; line-height:24px; box-sizing:border-box; padding:0 8px; border-radius:13px; border:1px solid ${info.color}88; background:rgba(255,255,255,0.07); color:#e6e6e6; cursor:pointer; outline:none; text-align:center; text-align-last:center; transition:all 0.15s ease;">
+    return `<select class="cfgsync-version-select" title="点击切换历史版本" style="display:inline-flex; align-items:center; font-size:10.5px; font-weight:500; height:22px; line-height:20px; box-sizing:border-box; padding:0 5px; border-radius:11px; border:1px solid ${info.color}88; background:rgba(255,255,255,0.07); color:#e6e6e6; cursor:pointer; outline:none; text-align:center; text-align-last:center; max-width:80px; transition:all 0.15s ease;">
       <option value="${currentV}" style="background:#23272e; color:#f0f0f0;" selected>${initialText}</option>
     </select>`;
   }
@@ -432,9 +454,9 @@ export class CloudConfigPanel {
 
         let label = '';
         if (isLatest) {
-          label = `v${v.version} (最新)${timeText ? ` — ${timeText}` : ''}${ownerTag}`;
+          label = `v${v.version} (最新)${timeText ? ` · ${timeText}` : ''}${ownerTag}`;
         } else {
-          label = `v${v.version}${timeText ? ` — ${timeText}` : ''}${ownerTag}`;
+          label = `v${v.version}${timeText ? ` · ${timeText}` : ''}${ownerTag}`;
         }
 
         const opt = document.createElement('option');
@@ -483,18 +505,20 @@ export class CloudConfigPanel {
         }
       } else {
         // 没有云端数据，显示精致胶囊 badge
-        badgeContainer.innerHTML = `<span class="cfgsync-state-badge" style="display:inline-flex; align-items:center; justify-content:center; width:100%; font-size:11px; height:26px; box-sizing:border-box; padding:0 8px; border-radius:13px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#8c8c8c; white-space:nowrap; user-select:none;">${info.label}</span>`;
+        badgeContainer.innerHTML = `<span class="cfgsync-state-badge" title="当前状态：${info.label}" style="display:inline-flex; align-items:center; justify-content:center; font-size:10.5px; height:22px; line-height:20px; box-sizing:border-box; padding:0 6px; border-radius:11px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); color:#8c8c8c; white-space:nowrap; user-select:none;">${info.label}</span>`;
       }
     }
 
     const pushBtn = row.querySelector('.cfgsync-push-btn');
     if (pushBtn) {
       pushBtn.disabled = !existsLocally;
+      pushBtn.style.opacity = existsLocally ? '0.9' : '0.35';
     }
 
     const pullBtn = row.querySelector('.cfgsync-pull-btn');
     if (pullBtn) {
       pullBtn.disabled = !cItem;
+      pullBtn.style.opacity = cItem ? '0.9' : '0.35';
     }
 
     const toggle = row.querySelector('.cfgsync-toggle');
@@ -510,9 +534,12 @@ export class CloudConfigPanel {
     row.dataset.contentType = contentType;
     row.style.cssText = `
       display: flex; align-items: center; justify-content: space-between;
-      padding: 7px 12px; margin-bottom: 6px; border-radius: 6px;
-      background: rgba(255, 255, 255, 0.05); gap: 12px;
+      padding: 6px 8px; margin-bottom: 4px; border-radius: 6px;
+      background: rgba(255, 255, 255, 0.04); gap: 8px;
+      transition: background 0.15s ease;
     `;
+    row.onmouseenter = () => { row.style.background = 'rgba(255, 255, 255, 0.07)'; };
+    row.onmouseleave = () => { row.style.background = 'rgba(255, 255, 255, 0.04)'; };
 
     row._binding = initialBinding;
     row._cloudItem = item.cloudItem || null;
@@ -523,19 +550,23 @@ export class CloudConfigPanel {
     const version = initialBinding?.last_synced_version || item.cloudItem?.current_version;
 
     row.innerHTML = `
-      <div style="display:flex; align-items:center; gap:10px; min-width:0; flex:1;">
-        <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} style="cursor:pointer; flex-shrink:0; width:15px; height:15px; margin:0; accent-color:#1890ff;" />
-        <div style="min-width:0; overflow:hidden; display:flex; flex-direction:column; gap:2px;">
-          <div style="font-size:13px; font-weight:500; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${item.displayName}</div>
-          <div style="font-size:11px; line-height:1.2; opacity:0.6; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${item.sourceRef}</div>
+      <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1;">
+        <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} title="${isEnabled ? '已开启云同步 (取消勾选停用)' : '勾选开启云同步'}" style="cursor:pointer; flex-shrink:0; width:15px; height:15px; margin:0; accent-color:#1890ff;" />
+        <div style="min-width:0; flex:1; overflow:hidden; display:flex; flex-direction:column; gap:1px;">
+          <div title="${item.displayName}" style="font-size:12.5px; font-weight:500; color:#f0f0f0; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${item.displayName}</div>
+          <div title="${item.sourceRef}" style="font-size:10.5px; line-height:1.2; color:rgba(255,255,255,0.4); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${item.sourceRef}</div>
         </div>
       </div>
-      <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-        <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center; justify-content:center; width:160px; min-width:160px; max-width:160px; flex-shrink:0;">
+      <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
+        <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">
           ${this.renderVersionSelectorHtml(state, version, item.cloudItem, initialBinding)}
         </div>
-        <button class="cfgsync-push-btn menu_button" style="white-space:nowrap !important; width:58px !important; min-width:58px !important; max-width:58px !important; height:26px !important; padding:0 !important; font-size:11px !important; line-height:1 !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important;" ${!row._existsLocally ? 'disabled' : ''}>推云端</button>
-        <button class="cfgsync-pull-btn menu_button" style="white-space:nowrap !important; width:58px !important; min-width:58px !important; max-width:58px !important; height:26px !important; padding:0 !important; font-size:11px !important; line-height:1 !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important;" ${!item.cloudItem ? 'disabled' : ''}>拉云端</button>
+        <button class="cfgsync-push-btn menu_button" title="推送到云端 (上传覆盖云端)" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; opacity:${row._existsLocally ? '0.9' : '0.35'};" ${!row._existsLocally ? 'disabled' : ''}>
+          <i class="fa-solid fa-cloud-arrow-up"></i>
+        </button>
+        <button class="cfgsync-pull-btn menu_button" title="从云端拉取 (下载覆盖本地)" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; opacity:${item.cloudItem ? '0.9' : '0.35'};" ${!item.cloudItem ? 'disabled' : ''}>
+          <i class="fa-solid fa-cloud-arrow-down"></i>
+        </button>
       </div>
     `;
 
@@ -578,8 +609,8 @@ export class CloudConfigPanel {
         row._binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
       }
       pushBtn.disabled = true;
-      const origText = pushBtn.textContent;
-      pushBtn.textContent = '推送中...';
+      const origHtml = pushBtn.innerHTML;
+      pushBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
       try {
         let localPayload = null;
         if (contentType === 'settings' && typeof window !== 'undefined') {
@@ -611,7 +642,8 @@ export class CloudConfigPanel {
         alert(`推送失败: ${e.message}`);
       } finally {
         pushBtn.disabled = !row._existsLocally;
-        pushBtn.textContent = origText;
+        pushBtn.innerHTML = origHtml;
+        pushBtn.style.opacity = row._existsLocally ? '0.9' : '0.35';
       }
     };
 
@@ -623,8 +655,8 @@ export class CloudConfigPanel {
         row._binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
       }
       pullBtn.disabled = true;
-      const origText = pullBtn.textContent;
-      pullBtn.textContent = '拉取中...';
+      const origHtml = pullBtn.innerHTML;
+      pullBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
       try {
         // 从版本下拉选择器读取用户选中的目标版本
         const versionSelect = row.querySelector('.cfgsync-version-select');
@@ -656,8 +688,9 @@ export class CloudConfigPanel {
       } catch (e) {
         alert(`拉取失败: ${e.message}`);
       } finally {
-        pullBtn.disabled = false;
-        pullBtn.textContent = origText;
+        pullBtn.disabled = !row._cloudItem;
+        pullBtn.innerHTML = origHtml;
+        pullBtn.style.opacity = row._cloudItem ? '0.9' : '0.35';
       }
     };
 
