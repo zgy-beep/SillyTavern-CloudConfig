@@ -91,7 +91,8 @@ export class CloudConfigApi {
     return this.request(`/pull?${params.toString()}`);
   }
 
-  async push({ contentType, itemUid, displayName, baseVersion, operation, checksum, payload, clientId, versionTitle, force }) {
+  async push({ contentType, itemUid, displayName, baseVersion, operation, checksum, payload, clientId, versionTitle, force, excludeHeavy, exclude_heavy }) {
+    const effExcludeHeavy = excludeHeavy !== undefined ? excludeHeavy : exclude_heavy;
     return this.request('/push', {
       method: 'POST',
       body: JSON.stringify({
@@ -105,6 +106,7 @@ export class CloudConfigApi {
         client_id: clientId,
         version_title: versionTitle,
         force,
+        exclude_heavy: effExcludeHeavy,
       }),
     });
   }
@@ -214,5 +216,29 @@ export class CloudConfigApi {
       since: String(since),
     });
     return this.request(`/audit?${params.toString()}`);
+  }
+
+  async deleteItem({ contentType, itemUid, deleteCloud = true, deleteLocal = false }) {
+    return this.request('/items', {
+      method: 'DELETE',
+      body: JSON.stringify({
+        content_type: contentType,
+        item_uid: itemUid,
+        delete_cloud: deleteCloud,
+        delete_local: deleteLocal,
+      }),
+    });
+  }
+
+  async setLock({ contentType, itemUid, owner = null, locked = true }) {
+    return this.request('/lock', {
+      method: 'POST',
+      body: JSON.stringify({
+        content_type: contentType,
+        item_uid: itemUid,
+        owner,
+        locked,
+      }),
+    });
   }
 }

@@ -49,6 +49,11 @@ export function createPluginRouter({
 
   // 1. GET /content-types
   router.get('/content-types', (req, res) => {
+    const isAdmin = Boolean(
+      req.user?.profile?.admin === true ||
+      req.authContext?.rawProfile?.admin === true ||
+      req.authContext?.isAdmin === true
+    );
     res.json({
       groups: {
         [ContentTypeGroup.P0]: P0ContentTypes,
@@ -57,6 +62,7 @@ export function createPluginRouter({
       },
       activeTypes: Array.from(adapters.keys()),
       current_user: req.authContext.handle,
+      is_admin: isAdmin,
     });
   });
 
@@ -125,7 +131,13 @@ export function createPluginRouter({
     if (scope === 'local') {
       // 发现本地 ST 目录下的对象（始终使用当前用户的真实数据目录）
       const localItems = await adapter.listItems(req.authContext.directories);
-      return res.json({ items: localItems });
+      const lockMap = syncService.getLockMap(req.authContext.handle, contentType);
+      return res.json({
+        items: localItems.map(item => ({
+          ...item,
+          is_locked: lockMap.has(item.itemUid) ? 1 : 0,
+        })),
+      });
     }
 
     // 查询云端记录
@@ -178,6 +190,7 @@ export function createPluginRouter({
       });
     }
 
+    const lockMap = syncService.getLockMap(req.authContext.handle, contentType);
     res.json({
       owner,
       content_type: contentType,
@@ -188,6 +201,7 @@ export function createPluginRouter({
         current_version: r.current_version,
         current_checksum: r.current_checksum,
         updated_at: r.updated_at,
+        is_locked: lockMap.has(`${r.owner_handle}:${r.item_uid}`) ? 1 : 0,
       })),
     });
   }));
@@ -214,6 +228,15 @@ export function createPluginRouter({
 
     const result = await syncService.pull(req.authContext, owner, contentType, itemUid, targetVersion);
     if (shouldApply === 'true' || shouldApply === true) {
+      // 服务端防替换锁定拦截（N-1 ~ N-3，N-5 杜绝任何绕过后门）
+      if (syncService.isLocked(req.authContext.handle, owner, contentType, itemUid)) {
+        return res.status(423).json({
+          error: 'LockedError',
+          code: 'LOCKED',
+          message: 'Target configuration is locked against overwrites',
+        });
+      }
+
       const adapter = adapters.get(contentType);
       if (adapter) {
         const injectSecrets = Boolean(validatedGrant?.inject_secrets);
@@ -254,6 +277,8 @@ export function createPluginRouter({
       version_title: versionTitle,
       base_version: baseVersion,
       force,
+      exclude_heavy,
+      excludeHeavy,
       operation = 'UPSERT',
       checksum = null,
       payload = null,
@@ -267,6 +292,8 @@ export function createPluginRouter({
       });
     }
 
+    const effectiveExcludeHeavy = exclude_heavy !== undefined ? exclude_heavy : excludeHeavy;
+
     const result = await syncService.push({
       authContext: req.authContext,
       ownerHandle: req.authContext.handle, // 写操作仅能推给自身
@@ -276,6 +303,7 @@ export function createPluginRouter({
       versionTitle,
       baseVersion: baseVersion !== undefined ? Number(baseVersion) : 0,
       force: force === true || force === 'true',
+      excludeHeavy: effectiveExcludeHeavy,
       operation,
       checksum,
       payload,
@@ -449,6 +477,136 @@ export function createPluginRouter({
     const updated = configService?.update(req.body) || {};
     res.json({ success: true, config: updated });
   });
+
+  // 10.6 POST /lock (服务端防替换锁定保护，N-1 ~ N-3, N-5)
+  router.post('/lock', asyncHandler(async (req, res) => {
+    const {
+      content_type: contentType,
+      item_uid: itemUid,
+      owner = null,
+      locked = true,
+    } = req.body;
+
+    if (!contentType || !itemUid) {
+      return res.status(400).json({ error: 'BadRequest', message: 'content_type and item_uid are required' });
+    }
+
+    const requesterHandle = req.authContext.handle;
+    const ownerHandle = owner || requesterHandle;
+
+    // 若锁定的是他人的共享配置，需验证当前请求者拥有该配置的合法读取授权
+    if (ownerHandle !== requesterHandle) {
+      const validatedGrant = authService.getApprovedGrant(ownerHandle, requesterHandle, contentType, itemUid);
+      if (!validatedGrant) {
+        return res.status(403).json({ error: 'ForbiddenError', message: 'No access to specified owner configuration' });
+      }
+    }
+
+    const isLocked = locked === true || locked === 'true' || locked === 1 || locked === '1';
+    syncService.setLock({
+      requesterHandle,
+      ownerHandle,
+      contentType,
+      itemUid,
+      locked: isLocked,
+    });
+
+    audit?.log({
+      actor: requesterHandle,
+      action: isLocked ? 'lock' : 'unlock',
+      target: ownerHandle,
+      contentType,
+      itemUid,
+      result: 'success',
+    });
+
+    res.json({ success: true, is_locked: isLocked ? 1 : 0 });
+  }));
+
+  // 10.7 DELETE /items (手动删除配置，含安全防护与备份，G-2 / N-4 / N-6)
+  router.delete('/items', asyncHandler(async (req, res) => {
+    const {
+      content_type: contentType,
+      item_uid: itemUid,
+      delete_cloud = true,
+      delete_local = false,
+    } = req.body;
+
+    if (!contentType || !itemUid) {
+      return res.status(400).json({ error: 'BadRequest', message: 'content_type and item_uid are required' });
+    }
+
+    const shouldDeleteCloud = delete_cloud === true || delete_cloud === 'true';
+    const shouldDeleteLocal = delete_local === true || delete_local === 'true';
+
+    // G-2 / N-4 铁律防护：settings 严格禁止删除本地文件，直接 400 拦截
+    if (contentType === 'settings' && shouldDeleteLocal) {
+      return res.status(400).json({
+        error: 'BadRequest',
+        message: 'Local settings.json cannot be deleted via API to protect SillyTavern runtime stability',
+      });
+    }
+
+    const adapter = adapters.get(contentType);
+    if (!adapter) {
+      return res.status(400).json({ error: 'BadRequest', message: `Unsupported content_type: ${contentType}` });
+    }
+
+    let backedUp = false;
+    // 1. 删除本地文件（需执行安全备份）
+    if (shouldDeleteLocal) {
+      try {
+        let localFilePath = null;
+        if (typeof adapter.getFilePath === 'function') {
+          localFilePath = await adapter.getFilePath(req.authContext.directories, itemUid);
+        }
+        if (localFilePath) {
+          const { autoBackupLocalFile } = await import('../adapters/P0Adapters.js');
+          await autoBackupLocalFile(localFilePath);
+          backedUp = true;
+        }
+      } catch (backupErr) {
+        console.warn('[cfgsync] autoBackupLocalFile failed during delete:', backupErr.message);
+      }
+
+      await adapter.apply(req.authContext.directories, itemUid, 'DELETE', null, null, {
+        sourceOwner: req.authContext.handle,
+        audit,
+      });
+    }
+
+    // 2. 删除云端备份（软删除 + 墓碑记录）
+    if (shouldDeleteCloud) {
+      await syncService.push({
+        authContext: req.authContext,
+        ownerHandle: req.authContext.handle, // 强制仅能删除自己名下的云端备份
+        contentType,
+        itemUid,
+        operation: 'DELETE',
+        force: true,
+      });
+    }
+
+    // 3. N-6 联动清理相关的锁记录
+    syncService.deleteLocksForItem(req.authContext.handle, contentType, itemUid);
+
+    // 4. 记入审计日志
+    audit?.log({
+      actor: req.authContext.handle,
+      action: 'delete',
+      target: req.authContext.handle,
+      contentType,
+      itemUid,
+      result: 'success',
+      details: { delete_cloud: shouldDeleteCloud, delete_local: shouldDeleteLocal, backed_up: backedUp },
+    });
+
+    res.json({
+      success: true,
+      deleted_cloud: shouldDeleteCloud,
+      deleted_local: shouldDeleteLocal,
+    });
+  }));
 
   // 11. POST /shares/revoke
   router.post('/shares/revoke', asyncHandler(async (req, res) => {

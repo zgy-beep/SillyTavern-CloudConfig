@@ -93,6 +93,7 @@ export class ClientSyncManager {
         clientId: this.clientId,
         versionTitle: options.versionTitle,
         force: options.force !== undefined ? options.force : true,
+        excludeHeavy: options.excludeHeavy !== undefined ? options.excludeHeavy : options.exclude_heavy,
       });
 
       binding.last_synced_version = res.version;

@@ -152,6 +152,28 @@ export class SyncService {
       ORDER BY updated_at DESC
       LIMIT 1
     `);
+
+    this.stmtGetLock = this.db.prepare(`
+      SELECT locked FROM binding_locks
+      WHERE requester_handle = :requester AND owner_handle = :owner AND content_type = :ct AND item_uid = :uid
+    `);
+
+    this.stmtSetLock = this.db.prepare(`
+      INSERT INTO binding_locks (requester_handle, owner_handle, content_type, item_uid, locked, locked_at)
+      VALUES (:requester, :owner, :ct, :uid, :locked, :now)
+      ON CONFLICT(requester_handle, owner_handle, content_type, item_uid)
+      DO UPDATE SET locked = :locked, locked_at = :now
+    `);
+
+    this.stmtGetLocksByRequester = this.db.prepare(`
+      SELECT owner_handle, item_uid, locked FROM binding_locks
+      WHERE requester_handle = :requester AND content_type = :ct
+    `);
+
+    this.stmtDeleteLocksForItem = this.db.prepare(`
+      DELETE FROM binding_locks
+      WHERE (owner_handle = :owner OR requester_handle = :owner) AND content_type = :ct AND item_uid = :uid
+    `);
   }
 
   getAdapter(contentType) {
@@ -186,6 +208,8 @@ export class SyncService {
     versionTitle = null,
     baseVersion,
     force = null,
+    excludeHeavy = null,
+    exclude_heavy = null,
     operation = OperationType.UPSERT,
     checksum = null,
     payload = null,
@@ -217,8 +241,16 @@ export class SyncService {
     if (operation === OperationType.UPSERT) {
       // 若客户端未提供 payload，则由适配器从本地真实文件读取
       if (payload === null || payload === undefined || (typeof payload === 'object' && Object.keys(payload).length === 0)) {
+        // D-1 优先级：按次入参 > 全局 ConfigService > 默认 true
+        const perPushVal = excludeHeavy !== null && excludeHeavy !== undefined ? excludeHeavy : exclude_heavy;
+        const effectiveExcludeHeavy = (perPushVal !== null && perPushVal !== undefined)
+          ? Boolean(perPushVal)
+          : (this.configService?.get('excludeHeavyExtensions') !== undefined
+              ? Boolean(this.configService.get('excludeHeavyExtensions'))
+              : true);
+
         try {
-          payload = await adapter.read(authContext.directories, itemUid);
+          payload = await adapter.read(authContext.directories, itemUid, { excludeHeavy: effectiveExcludeHeavy });
         } catch (readErr) {
           if (!payload || (typeof payload === 'object' && Object.keys(payload).length === 0)) {
             throw new BadRequestError(`No payload provided and failed to read local file: ${readErr.message}`);
@@ -562,5 +594,65 @@ export class SyncService {
         ':version': v.version,
       });
     }
+  }
+
+  /**
+   * 检查指定四元组是否处于防替换锁定状态
+   */
+  isLocked(requesterHandle, ownerHandle, contentType, itemUid) {
+    const row = this.stmtGetLock.get({
+      ':requester': requesterHandle,
+      ':owner': ownerHandle,
+      ':ct': contentType,
+      ':uid': itemUid,
+    });
+    return Boolean(row && row.locked === 1);
+  }
+
+  /**
+   * 设置或解除防替换锁定
+   */
+  setLock({ requesterHandle, ownerHandle, contentType, itemUid, locked }) {
+    const val = locked ? 1 : 0;
+    this.stmtSetLock.run({
+      ':requester': requesterHandle,
+      ':owner': ownerHandle,
+      ':ct': contentType,
+      ':uid': itemUid,
+      ':locked': val,
+      ':now': Date.now(),
+    });
+    return { locked: val === 1 };
+  }
+
+  /**
+   * 批量获取指定请求者在某类别下的所有激活锁定
+   */
+  getLockMap(requesterHandle, contentType) {
+    const rows = this.stmtGetLocksByRequester.all({
+      ':requester': requesterHandle,
+      ':ct': contentType,
+    });
+    const map = new Map();
+    for (const r of rows) {
+      if (r.locked === 1) {
+        map.set(`${r.owner_handle}:${r.item_uid}`, true);
+        if (r.owner_handle === requesterHandle) {
+          map.set(r.item_uid, true);
+        }
+      }
+    }
+    return map;
+  }
+
+  /**
+   * 清理与指定配置项相关的所有锁记录（联动清理）
+   */
+  deleteLocksForItem(ownerHandle, contentType, itemUid) {
+    this.stmtDeleteLocksForItem.run({
+      ':owner': ownerHandle,
+      ':ct': contentType,
+      ':uid': itemUid,
+    });
   }
 }

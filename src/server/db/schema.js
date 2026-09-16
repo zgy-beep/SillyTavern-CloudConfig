@@ -79,6 +79,16 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS binding_locks (
+  requester_handle TEXT NOT NULL,
+  owner_handle     TEXT NOT NULL,
+  content_type     TEXT NOT NULL,
+  item_uid         TEXT NOT NULL,
+  locked           INTEGER NOT NULL DEFAULT 1,
+  locked_at        INTEGER NOT NULL,
+  PRIMARY KEY (requester_handle, owner_handle, content_type, item_uid)
+);
+
 CREATE INDEX IF NOT EXISTS idx_change_events_seq ON change_events(seq);
 CREATE INDEX IF NOT EXISTS idx_change_events_owner ON change_events(owner_handle, seq);
 CREATE INDEX IF NOT EXISTS idx_config_versions_lookup ON config_versions(owner_handle, content_type, item_uid, version DESC);
@@ -86,4 +96,5 @@ CREATE INDEX IF NOT EXISTS idx_share_grants_lookup ON share_grants(grantee_handl
 CREATE INDEX IF NOT EXISTS idx_share_grants_code ON share_grants(share_code_hash);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_handle, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_target ON audit_logs(target_handle, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_binding_locks_lookup ON binding_locks(requester_handle, content_type);
 `;

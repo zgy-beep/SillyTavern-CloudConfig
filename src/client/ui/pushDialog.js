@@ -65,9 +65,14 @@ export function showPushDialog({ displayName, contentType, onConfirm }) {
           <span>网盘直传模式，自动保留最近 20 个快照版本</span>
         </div>
         ${isSettings ? `
-        <div style="font-size:11px; color:#52c41a; display:flex; align-items:center; gap:6px;">
-          <i class="fa-solid fa-shield-halved" style="font-size:11px;"></i>
-          <span>已自动精简酒馆助手缓存并执行落盘备份保护</span>
+        <div style="margin-top:6px; padding:8px 10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; color:#e6edf3; user-select:none;">
+            <input id="cfgsync-exclude-heavy-cb" type="checkbox" checked style="accent-color:#1890ff; width:15px; height:15px; cursor:pointer;" />
+            <span style="font-weight:500;">精简酒馆助手 (TavernHelper) 缓存数据</span>
+          </label>
+          <div id="cfgsync-heavy-hint" style="font-size:11px; color:#8b949e; margin-top:4px; margin-left:23px; line-height:1.4;">
+            建议精简：排除插件运行期庞大变量与脚本缓存（预估体积 <span style="color:#52c41a; font-weight:600;">~1.0 MB</span>，省流且同步迅速）
+          </div>
         </div>
         ` : ''}
       </div>
@@ -105,6 +110,29 @@ export function showPushDialog({ displayName, contentType, onConfirm }) {
   const input = modal.querySelector('#cfgsync-push-title-input');
   const submitBtn = modal.querySelector('#cfgsync-push-submit-btn');
 
+  const heavyCb = modal.querySelector('#cfgsync-exclude-heavy-cb');
+  const heavyHint = modal.querySelector('#cfgsync-heavy-hint');
+  if (heavyCb && heavyHint) {
+    const savedPref = typeof localStorage !== 'undefined' ? localStorage.getItem('cfgsync_pref_exclude_heavy') : null;
+    if (savedPref !== null) {
+      heavyCb.checked = savedPref !== 'false';
+    }
+    const updateHint = () => {
+      if (heavyCb.checked) {
+        heavyHint.innerHTML = '建议精简：排除插件运行期庞大变量与脚本缓存（预估体积 <span style="color:#52c41a; font-weight:600;">~1.0 MB</span>，省流且同步迅速）';
+      } else {
+        heavyHint.innerHTML = '完整上传：包含酒馆助手全部运行期缓存（预估体积 <span style="color:#faad14; font-weight:600;">~6.6 MB</span>，耗时可能较长）';
+      }
+    };
+    heavyCb.onchange = () => {
+      updateHint();
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('cfgsync_pref_exclude_heavy', String(heavyCb.checked));
+      }
+    };
+    updateHint();
+  }
+
   // 获得焦点时选中全部文字方便修改
   input.onfocus = () => {
     input.style.borderColor = '#1890ff';
@@ -119,11 +147,12 @@ export function showPushDialog({ displayName, contentType, onConfirm }) {
 
   const handleSubmit = async () => {
     const title = input.value.trim() || defaultTitle;
+    const excludeHeavy = heavyCb ? heavyCb.checked : undefined;
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>上传中...</span>';
     try {
       if (onConfirm) {
-        await onConfirm(title);
+        await onConfirm(title, { excludeHeavy });
       }
       close();
     } catch (err) {
