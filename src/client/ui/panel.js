@@ -26,6 +26,7 @@ export class CloudConfigPanel {
     this.onAccountChange = onAccountChange;
     this.container = null;
     this._refreshing = false;
+    this.thumbnailCache = new Map();
   }
 
   render(targetEl) {
@@ -54,6 +55,10 @@ export class CloudConfigPanel {
             <button id="cfgsync-refresh-btn" type="button" title="刷新配置状态" style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; margin:0; border-radius:4px; font-size:10px; color:#69c0ff; background:rgba(24,144,255,0.12); border:1px solid rgba(24,144,255,0.3); cursor:pointer; user-select:none;">
               <i class="fa-solid fa-rotate"></i>
             </button>
+            <button id="cfgsync-backup-all-btn" type="button" title="一键备份所有已开启同步的本地配置到云端" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 8px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#13c2c2; background:rgba(19,194,194,0.12); border:1px solid rgba(19,194,194,0.3); cursor:pointer; user-select:none;">
+              <i class="fa-solid fa-cloud-arrow-up" style="font-size:10px;"></i>
+              <span class="cfgsync-backup-all-text">一键备份</span>
+            </button>
             <button id="cfgsync-claim-btn" type="button" title="认领好友分享给你的配置邀请码" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 8px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#52c41a; background:rgba(82,196,26,0.12); border:1px solid rgba(82,196,26,0.3); cursor:pointer; user-select:none;">
               <i class="fa-solid fa-key" style="font-size:10px;"></i>
               <span>认领</span>
@@ -71,6 +76,7 @@ export class CloudConfigPanel {
 
     this.bindToggleAll();
     this.bindRefresh();
+    this.bindBackupAll();
     this.bindClaim();
     this.bindSettings();
   }
@@ -121,6 +127,105 @@ export class CloudConfigPanel {
         if (icon) icon.classList.remove('fa-spin');
       }
     };
+  }
+
+  bindBackupAll() {
+    const backupBtn = this.container.querySelector('#cfgsync-backup-all-btn');
+    if (!backupBtn || backupBtn.dataset.bound) return;
+    backupBtn.dataset.bound = 'true';
+
+    backupBtn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      await this.runBackupAll();
+    };
+  }
+
+  /**
+   * 严格串行执行一键备份已同步项 (P5-8, Step 3)
+   * 包含进度展示、单项容错、总大小预估
+   * @returns {Promise<{ total: number, successCount: number, failCount: number, totalBytes?: number, cancelled?: boolean }>}
+   */
+  async runBackupAll() {
+    const backupBtn = this.container?.querySelector?.('#cfgsync-backup-all-btn');
+    const textSpan = backupBtn?.querySelector?.('.cfgsync-backup-all-text');
+    const iconI = backupBtn?.querySelector?.('i');
+
+    const bindings = await this.storage.getBindingsByAccount(this.accountHandle);
+    const enabledBindings = (bindings || []).filter(b => b.enabled);
+
+    if (enabledBindings.length === 0) {
+      alert('当前没有已开启云同步的配置项。\n请先勾选需要同步的项目复选框，再执行一键备份。');
+      return { total: 0, successCount: 0, failCount: 0 };
+    }
+
+    const confirmMsg = `已发现 ${enabledBindings.length} 个已开启云同步的配置项。\n将依次备份到云端（严格串行执行保证安全性）。\n\n是否立即开始？`;
+    if (typeof confirm === 'function' && !confirm(confirmMsg)) {
+      return { total: enabledBindings.length, successCount: 0, failCount: 0, cancelled: true };
+    }
+
+    if (backupBtn) {
+      backupBtn.disabled = true;
+      if (iconI) iconI.className = 'fa-solid fa-spinner fa-spin';
+    }
+
+    let successCount = 0;
+    let totalBytes = 0;
+    const failures = [];
+
+    try {
+      for (let i = 0; i < enabledBindings.length; i++) {
+        const binding = enabledBindings[i];
+        const progressText = `正在备份 (${i + 1}/${enabledBindings.length})...`;
+        if (textSpan) textSpan.textContent = progressText;
+
+        try {
+          let localPayload = null;
+          if (binding.content_type === 'settings' && typeof window !== 'undefined') {
+            try {
+              const s = window.settings || window.SillyTavern?.getContext?.()?.settings;
+              if (s && typeof s === 'object' && Object.keys(s).length > 0) {
+                localPayload = JSON.parse(JSON.stringify(s));
+              }
+            } catch {}
+          }
+
+          const res = await this.syncManager.pushLocal(binding, localPayload, {
+            force: true,
+            versionTitle: `一键批量备份 (${new Date().toLocaleTimeString()})`,
+          });
+
+          if (res?.success !== false) {
+            successCount++;
+            if (res.size_bytes) {
+              totalBytes += Number(res.size_bytes);
+            }
+          } else {
+            failures.push({ name: binding.display_name, error: res.error || '上传未成功' });
+          }
+        } catch (err) {
+          console.error(`[cfgsync] 一键备份项【${binding.display_name}】失败:`, err);
+          failures.push({ name: binding.display_name, error: err.message || String(err) });
+        }
+      }
+
+      await this.refresh();
+
+      const sizeDesc = totalBytes > 0 ? ` (总计上传约 ${(totalBytes / 1024).toFixed(1)} KB)` : '';
+      let summaryMsg = `【一键备份完成】\n\n成功备份: ${successCount} 项${sizeDesc}\n失败: ${failures.length} 项`;
+      if (failures.length > 0) {
+        summaryMsg += `\n\n失败详情:\n` + failures.map(f => `• ${f.name}: ${f.error}`).join('\n');
+      }
+      alert(summaryMsg);
+
+      return { total: enabledBindings.length, successCount, failCount: failures.length, totalBytes, failures };
+    } finally {
+      if (backupBtn) {
+        backupBtn.disabled = false;
+        if (textSpan) textSpan.textContent = '一键备份';
+        if (iconI) iconI.className = 'fa-solid fa-cloud-arrow-up';
+      }
+    }
   }
 
   bindToggleAll() {
@@ -195,6 +300,8 @@ export class CloudConfigPanel {
 
       const ctNameMap = {
         'settings': '通用设置',
+        'character': '角色卡',
+        'theme': '主题风格',
         'openai_preset': 'OpenAI 预设',
         'textgen_preset': 'TextGen 预设',
         'novel_preset': 'NovelAI 预设',
@@ -828,15 +935,34 @@ export class CloudConfigPanel {
 
     const lockOwnerTip = (cItem?.owner_handle && cItem.owner_handle !== this.accountHandle) ? `来自 @${cItem.owner_handle} 的配置` : '此配置';
 
+    let iconOrAvatarHtml = '';
+    if (contentType === 'character') {
+      const avatarSrc = `/characters/${encodeURIComponent(item.sourceRef || item.displayName + '.png')}`;
+      iconOrAvatarHtml = `
+        <div style="width:20px; height:20px; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; border-radius:3px; overflow:hidden; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);">
+          <img class="cfgsync-char-avatar" src="${avatarSrc}" alt="" style="width:100%; height:100%; object-fit:cover; display:block;" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='inline-flex';" />
+          <i class="cfgsync-char-fallback fa-solid fa-user-ninja" style="display:none; font-size:11px; color:#58a6ff;"></i>
+        </div>
+      `;
+    } else if (contentType === 'theme') {
+      iconOrAvatarHtml = `<i class="fa-solid fa-palette" style="font-size:12px; color:#d48806; flex-shrink:0;"></i>`;
+    } else if (contentType === 'settings') {
+      iconOrAvatarHtml = `<i class="fa-solid fa-sliders" style="font-size:11px; color:#79c0ff; flex-shrink:0;"></i>`;
+    } else if (contentType === 'world') {
+      iconOrAvatarHtml = `<i class="fa-solid fa-book-atlas" style="font-size:11px; color:#7ee787; flex-shrink:0;"></i>`;
+    } else {
+      iconOrAvatarHtml = `<i class="cfgsync-row-icon ${hasCloud ? 'fa-solid fa-cloud' : 'fa-regular fa-file'}" style="font-size:11px; color:${hasCloud ? '#58a6ff' : 'rgba(255,255,255,0.3)'}; flex-shrink:0;"></i>`;
+    }
+
     row.innerHTML = `
       <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1;">
         <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} title="${isEnabled ? '已开启云同步 (取消勾选停用)' : (hasCloud ? '勾选开启自动同步' : '未同步：勾选后可在推送时自动关联同步')}" style="cursor:pointer; flex-shrink:0; width:15px; height:15px; margin:0; accent-color:#1890ff;" />
         <div style="min-width:0; flex:1; overflow:hidden; display:flex; flex-direction:column; gap:1px;">
-          <div title="${item.displayName}" style="font-size:12.5px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? '#f0f6fc' : '#c9d1d9'}; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:flex; align-items:center; gap:5px;">
-            <i class="cfgsync-row-icon ${hasCloud ? 'fa-solid fa-cloud' : 'fa-regular fa-file'}" style="font-size:11px; color:${hasCloud ? '#58a6ff' : 'rgba(255,255,255,0.3)'}; flex-shrink:0;"></i>
+          <div title="${item.displayName}" style="font-size:12.5px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? '#f0f6fc' : '#c9d1d9'}; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:flex; align-items:center; gap:6px;">
+            ${iconOrAvatarHtml}
             <span class="cfgsync-row-name" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.displayName}</span>
           </div>
-          <div class="cfgsync-row-ref" data-source-ref="${item.sourceRef}" title="${item.sourceRef}" style="font-size:10.5px; line-height:1.2; color:${hasCloud ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)'}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; padding-left: 16px;">${item.sourceRef}${!hasCloud ? ' · 仅本地' : ''}</div>
+          <div class="cfgsync-row-ref" data-source-ref="${item.sourceRef}" title="${item.sourceRef}" style="font-size:10.5px; line-height:1.2; color:${hasCloud ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)'}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; padding-left: 26px;">${item.sourceRef}${!hasCloud ? ' · 仅本地' : ''}</div>
         </div>
       </div>
       <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
@@ -858,6 +984,19 @@ export class CloudConfigPanel {
     `;
 
     row._itemDisplayName = item.displayName;
+
+    if (contentType === 'character') {
+      const avatarImg = row.querySelector('.cfgsync-char-avatar');
+      if (avatarImg) {
+        if (this.thumbnailCache.has(item.itemUid)) {
+          avatarImg.src = this.thumbnailCache.get(item.itemUid);
+        } else {
+          avatarImg.onload = () => {
+            this.thumbnailCache.set(item.itemUid, avatarImg.src);
+          };
+        }
+      }
+    }
 
     // 绑定快照历史弹窗事件
     const historyBtn = row.querySelector('.cfgsync-history-badge-btn');
