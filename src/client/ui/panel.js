@@ -339,9 +339,11 @@ export class CloudConfigPanel {
       return { color: '#1890ff', label: '冷备份就绪' };
     }
     if (cloudItem) {
-      return { color: '#722ed1', label: `云端就绪 (v${cloudItem.current_version} · ${cloudItem.owner_handle})` };
+      const isCross = cloudItem.owner_handle && cloudItem.owner_handle !== this.accountHandle;
+      const ownerText = isCross ? ` · @${cloudItem.owner_handle}` : '';
+      return { color: '#722ed1', label: `云端就绪 (v${cloudItem.current_version}${ownerText})` };
     }
-    return { color: '#555', label: '未同步' };
+    return { color: '#666', label: '未同步' };
   }
 
   /**
@@ -365,27 +367,30 @@ export class CloudConfigPanel {
   }
 
   /**
-   * 为指定行渲染版本选择器的初始 HTML
+   * 为指定行渲染版本选择器的初始 HTML（方案 A：极简胶囊风）
    * @returns {string} select 或 badge 的 HTML
    */
   renderVersionSelectorHtml(state, version, cloudItem = null, binding = null) {
     const info = this.getStateInfo(state, version, cloudItem, binding);
 
-    // 云端没有任何版本时，显示静态徽章
+    // 云端没有任何版本时，显示精致胶囊徽章（固定高度 26px，居中对齐）
     if (!cloudItem) {
-      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:${info.color}; color:#fff; white-space:nowrap;">${info.label}</span>`;
+      return `<span class="cfgsync-state-badge" style="display:inline-flex; align-items:center; justify-content:center; width:100%; font-size:11px; height:26px; box-sizing:border-box; padding:0 8px; border-radius:13px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#8c8c8c; white-space:nowrap; user-select:none;">${info.label}</span>`;
     }
 
-    // 有云端版本时，显示下拉选择器（初始仅显示当前版本，懒加载完整列表）
-    const ownerText = cloudItem.owner_handle || '';
+    // 有云端版本时，显示方案 A 极简胶囊下拉选择器（固定高度 26px，占满容器宽度并居中）
     const currentV = cloudItem.current_version || 1;
-    return `<select class="cfgsync-version-select" style="font-size:11px; padding:2px 4px; border-radius:3px; border:2px solid ${info.color}; background:rgba(0,0,0,0.3); color:#fff; cursor:pointer; max-width:180px; outline:none; appearance:auto; -webkit-appearance:menulist;">
-      <option value="${currentV}" selected>v${currentV} · 最新 · ${ownerText}</option>
+    const isCross = cloudItem.owner_handle && cloudItem.owner_handle !== this.accountHandle;
+    const ownerSuffix = isCross ? ` · @${cloudItem.owner_handle}` : '';
+    const initialText = `☁️ v${currentV} (最新${ownerSuffix})`;
+
+    return `<select class="cfgsync-version-select" style="display:inline-flex; align-items:center; width:100%; font-size:11px; font-weight:500; height:26px; line-height:24px; box-sizing:border-box; padding:0 8px; border-radius:13px; border:1px solid ${info.color}88; background:rgba(255,255,255,0.07); color:#e6e6e6; cursor:pointer; outline:none; text-align:center; text-align-last:center; transition:all 0.15s ease;">
+      <option value="${currentV}" style="background:#23272e; color:#f0f0f0;" selected>${initialText}</option>
     </select>`;
   }
 
   /**
-   * 懒加载版本历史到下拉选择器
+   * 懒加载版本历史到下拉选择器（方案 A 极简层级）
    */
   async loadVersionOptions(row) {
     if (row._versionsLoaded) return;
@@ -395,6 +400,7 @@ export class CloudConfigPanel {
     const contentType = row.dataset.contentType;
     const itemUid = row.dataset.itemUid;
     const owner = cloudItem.owner_handle || this.accountHandle;
+    const isCross = owner !== this.accountHandle;
 
     try {
       const res = await this.api.getVersions(contentType, itemUid, owner);
@@ -412,12 +418,19 @@ export class CloudConfigPanel {
         if (v.operation === 'DELETE') continue;
         const isLatest = i === 0;
         const timeText = v.created_at ? this.formatRelativeTime(v.created_at) : '';
-        const label = isLatest
-          ? `v${v.version} · 最新 · ${owner} · ${timeText}`
-          : `v${v.version} · ${owner} · ${timeText}`;
+        const ownerTag = isCross ? ` · @${owner}` : '';
+
+        let label = '';
+        if (isLatest) {
+          label = `v${v.version} (最新)${timeText ? ` — ${timeText}` : ''}${ownerTag}`;
+        } else {
+          label = `v${v.version}${timeText ? ` — ${timeText}` : ''}${ownerTag}`;
+        }
+
         const opt = document.createElement('option');
         opt.value = String(v.version);
         opt.textContent = label;
+        opt.style.cssText = 'background: #23272e; color: #f0f0f0;';
         if (String(v.version) === currentSelected) opt.selected = true;
         select.appendChild(opt);
       }
@@ -448,10 +461,10 @@ export class CloudConfigPanel {
     if (badgeContainer) {
       const select = badgeContainer.querySelector('.cfgsync-version-select');
       if (select) {
-        // 有版本选择器时，仅更新边框颜色
-        select.style.borderColor = info.color;
+        // 有版本选择器时，更新胶囊边框颜色
+        select.style.borderColor = `${info.color}88`;
       } else if (cItem) {
-        // 云端有数据但选择器还没创建（可能状态变化后出现了 cloudItem），用选择器替换 badge
+        // 云端有数据但选择器还没创建，用胶囊选择器替换 badge
         badgeContainer.innerHTML = this.renderVersionSelectorHtml(state, version, cItem, binding);
         const newSelect = badgeContainer.querySelector('.cfgsync-version-select');
         if (newSelect) {
@@ -459,8 +472,8 @@ export class CloudConfigPanel {
           newSelect.addEventListener('mousedown', () => this.loadVersionOptions(row), { once: true });
         }
       } else {
-        // 没有云端数据，显示静态 badge
-        badgeContainer.innerHTML = `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:${info.color}; color:#fff; white-space:nowrap;">${info.label}</span>`;
+        // 没有云端数据，显示精致胶囊 badge
+        badgeContainer.innerHTML = `<span class="cfgsync-state-badge" style="display:inline-flex; align-items:center; justify-content:center; width:100%; font-size:11px; height:26px; box-sizing:border-box; padding:0 8px; border-radius:13px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.15); color:#8c8c8c; white-space:nowrap; user-select:none;">${info.label}</span>`;
       }
     }
 
@@ -487,8 +500,8 @@ export class CloudConfigPanel {
     row.dataset.contentType = contentType;
     row.style.cssText = `
       display: flex; align-items: center; justify-content: space-between;
-      padding: 8px 12px; margin-bottom: 6px; border-radius: 4px;
-      background: rgba(255, 255, 255, 0.05); gap: 8px;
+      padding: 7px 12px; margin-bottom: 6px; border-radius: 6px;
+      background: rgba(255, 255, 255, 0.05); gap: 12px;
     `;
 
     row._binding = initialBinding;
@@ -501,18 +514,18 @@ export class CloudConfigPanel {
 
     row.innerHTML = `
       <div style="display:flex; align-items:center; gap:10px; min-width:0; flex:1;">
-        <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} style="cursor:pointer; flex-shrink:0;" />
-        <div style="min-width:0; overflow:hidden;">
-          <div style="font-size:13px; font-weight:500; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${item.displayName}</div>
-          <div style="font-size:11px; opacity:0.6; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${item.sourceRef}</div>
+        <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} style="cursor:pointer; flex-shrink:0; width:15px; height:15px; margin:0; accent-color:#1890ff;" />
+        <div style="min-width:0; overflow:hidden; display:flex; flex-direction:column; gap:2px;">
+          <div style="font-size:13px; font-weight:500; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${item.displayName}</div>
+          <div style="font-size:11px; line-height:1.2; opacity:0.6; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${item.sourceRef}</div>
         </div>
       </div>
       <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-        <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center;">
+        <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center; justify-content:center; width:160px; min-width:160px; max-width:160px; flex-shrink:0;">
           ${this.renderVersionSelectorHtml(state, version, item.cloudItem, initialBinding)}
         </div>
-        <button class="cfgsync-push-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${!row._existsLocally ? 'disabled' : ''}>推云端</button>
-        <button class="cfgsync-pull-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${!item.cloudItem ? 'disabled' : ''}>拉云端</button>
+        <button class="cfgsync-push-btn menu_button" style="white-space:nowrap !important; width:58px !important; min-width:58px !important; max-width:58px !important; height:26px !important; padding:0 !important; font-size:11px !important; line-height:1 !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important;" ${!row._existsLocally ? 'disabled' : ''}>推云端</button>
+        <button class="cfgsync-pull-btn menu_button" style="white-space:nowrap !important; width:58px !important; min-width:58px !important; max-width:58px !important; height:26px !important; padding:0 !important; font-size:11px !important; line-height:1 !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important;" ${!item.cloudItem ? 'disabled' : ''}>拉云端</button>
       </div>
     `;
 
