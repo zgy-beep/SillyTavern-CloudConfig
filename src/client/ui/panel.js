@@ -665,21 +665,6 @@ export class CloudConfigPanel {
       }
     }
 
-    const pullBtn = row.querySelector('.cfgsync-pull-btn');
-    if (pullBtn) {
-      pullBtn.disabled = !hasCloud;
-      if (!hasCloud) {
-        pullBtn.style.opacity = '0.15';
-        pullBtn.style.pointerEvents = 'none';
-        pullBtn.style.cursor = 'not-allowed';
-        pullBtn.title = '云端暂无此配置，无法拉取';
-      } else {
-        pullBtn.style.opacity = '0.9';
-        pullBtn.style.pointerEvents = 'auto';
-        pullBtn.style.cursor = 'pointer';
-        pullBtn.title = '从云端拉取 (下载覆盖本地)';
-      }
-    }
 
     const shareBtn = row.querySelector('.cfgsync-share-btn');
     if (shareBtn) {
@@ -758,15 +743,14 @@ export class CloudConfigPanel {
         <button class="cfgsync-push-btn menu_button" title="${hasCloud ? '推送到云端 (上传新快照覆盖云端)' : '未同步：立即推送到云端生成首个快照'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; ${!row._existsLocally ? 'opacity:0.25 !important; pointer-events:none;' : (!hasCloud ? 'opacity:1 !important; background:rgba(31,111,235,0.22) !important; border:1px solid rgba(88,166,255,0.5) !important; color:#58a6ff !important;' : 'opacity:0.9;')}">
           <i class="fa-solid fa-cloud-arrow-up"></i>
         </button>
-        <button class="cfgsync-pull-btn menu_button" title="${hasCloud ? '从云端拉取 (下载覆盖本地)' : '云端暂无此配置，无法拉取'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'opacity:0.9; cursor:pointer !important;'}">
-          <i class="fa-solid fa-cloud-arrow-down"></i>
-        </button>
+        ${contentType !== 'settings' ? `
         <button class="cfgsync-share-btn menu_button" title="${hasCloud ? '分享配置 (生成邀请码 / 设为公开)' : '尚未推送到云端，无法分享'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'opacity:0.9; cursor:pointer !important;'}">
           <i class="fa-solid fa-share-nodes"></i>
         </button>
         <button class="cfgsync-delete-btn menu_button" title="删除配置 (云端备份 / 本地文件)" style="white-space:nowrap !important; width:24px !important; min-width:24px !important; max-width:24px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; background:transparent; border:1px solid rgba(255,255,255,0.12); color:rgba(255,255,255,0.4); transition:all 0.15s ease;">
           <i class="fa-regular fa-trash-can"></i>
         </button>
+        ` : ''}
       </div>
     `;
 
@@ -879,11 +863,6 @@ export class CloudConfigPanel {
       });
     };
 
-    // 手动从云端拉取（默认拉取最新快照；历史快照可通过快照历史胶囊选择性还原）
-    const pullBtn = row.querySelector('.cfgsync-pull-btn');
-    pullBtn.onclick = async () => {
-      await this.restoreSnapshot(row, contentType, item, null);
-    };
 
     // 分享配置（专属邀请码 / 全服公开）
     const shareBtn = row.querySelector('.cfgsync-share-btn');

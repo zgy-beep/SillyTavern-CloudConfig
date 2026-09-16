@@ -56,8 +56,8 @@ export function showPushDialog({ displayName, contentType, onConfirm }) {
     </div>
 
     <div style="margin: 14px 0 16px 0;">
-      <label style="display:block; font-size:12px; font-weight:500; color:#c9d1d9; margin-bottom:6px;">快照名称 / 备注 (可直接回车上传)</label>
-      <input id="cfgsync-push-title-input" type="text" maxlength="64" value="" placeholder="例如: 基础版本 (留空自动使用当前时间)" spellcheck="false" autocomplete="off" style="width:100%; box-sizing:border-box; padding:9px 12px; font-size:13px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; border-radius:7px; border:1.5px solid rgba(255,255,255,0.18); background:#12151d; color:#58a6ff; outline:none; transition:border-color 0.2s ease, box-shadow 0.2s ease;" />
+      <label style="display:block; font-size:12px; font-weight:500; color:#c9d1d9; margin-bottom:6px;">快照备注 (默认当前时间，可直接回车保存)</label>
+      <input id="cfgsync-push-title-input" type="text" maxlength="64" value="${defaultTitle}" placeholder="快照备注 (例如: 调优版，留空使用当前时间)" spellcheck="false" autocomplete="off" style="width:100%; box-sizing:border-box; padding:9px 12px; font-size:13px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; border-radius:7px; border:1.5px solid rgba(255,255,255,0.18); background:#12151d; color:#58a6ff; outline:none; transition:border-color 0.2s ease, box-shadow 0.2s ease;" />
       
       <div style="margin-top:10px; display:flex; flex-direction:column; gap:4px;">
         <div style="font-size:11.5px; color:#8b949e; display:flex; align-items:center; gap:6px;">
