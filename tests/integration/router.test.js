@@ -180,13 +180,12 @@ test('Integration: Express Router Endpoints', async (t) => {
     assert.equal(data.items[0].item_uid, itemUid);
   });
 
-  await t.test('11. GET /pull with non-existent owner falls back to existing record', async () => {
-    // 假定请求者是 bob，以 bob 作为 owner 请求，但实际上是 alice 创建的
+  await t.test('11. GET /pull with unauthorized owner is rejected with 403 Forbidden', async () => {
+    // 请求者 alice 尝试未授权读取 bob 的设置，必须严格返回 403 Forbidden
     const pullRes = await fetch(`${baseUrl}/pull?content_type=settings&item_uid=${itemUid}&owner=bob`);
-    assert.equal(pullRes.status, 200);
+    assert.equal(pullRes.status, 403);
     const data = await pullRes.json();
-    assert.equal(data.owner_handle, 'alice'); // 自动回退到实际拥有者
-    assert.equal(data.version, 2);
+    assert.equal(data.error, 'ForbiddenError');
   });
 
   // 关闭服务

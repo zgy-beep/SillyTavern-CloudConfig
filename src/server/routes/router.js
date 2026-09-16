@@ -48,13 +48,21 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
 
   // 1.5 GET /owners
   router.get('/owners', asyncHandler(async (req, res) => {
+    const requester = req.authContext.handle;
     const stmt = syncService.db.prepare(`
-      SELECT DISTINCT owner_handle FROM config_records WHERE is_deleted = 0 ORDER BY owner_handle ASC
+      SELECT DISTINCT owner_handle FROM config_records 
+      WHERE owner_handle = :requester AND is_deleted = 0
+      UNION
+      SELECT DISTINCT owner_handle FROM share_grants
+      WHERE (grantee_handle = :requester OR grantee_handle IS NULL)
+        AND status = 'active'
+        AND (expires_at IS NULL OR expires_at > :now)
+      ORDER BY owner_handle ASC
     `);
-    const rows = stmt.all();
+    const rows = stmt.all({ ':requester': requester, ':now': Date.now() });
     res.json({
       owners: rows.map(r => r.owner_handle),
-      current_user: req.authContext.handle,
+      current_user: requester,
     });
   }));
 
@@ -80,21 +88,37 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
       return res.json({ items: localItems });
     }
 
-    if (!isAllOwners && !authService.can(Permission.READ, req.authContext.handle, owner, contentType)) {
-      return res.status(403).json({ error: 'Forbidden', message: 'No read permission on requested target' });
-    }
-
     // 查询云端记录
     let records = [];
     if (isAllOwners) {
+      // 仅查询当前用户自身的数据，以及授权给当前用户的云端数据，绝不泄露全站未授权用户数据
       const stmt = syncService.db.prepare(`
-        SELECT owner_handle, item_uid, display_name, current_version, current_checksum, updated_at
-        FROM config_records
-        WHERE content_type = :ct AND is_deleted = 0
-        ORDER BY updated_at DESC
+        SELECT DISTINCT c.owner_handle, c.item_uid, c.display_name, c.current_version, c.current_checksum, c.updated_at
+        FROM config_records c
+        WHERE c.content_type = :ct AND c.is_deleted = 0
+          AND (
+            c.owner_handle = :requester
+            OR EXISTS (
+              SELECT 1 FROM share_grants g
+              WHERE g.owner_handle = c.owner_handle
+                AND (g.grantee_handle = :requester OR g.grantee_handle IS NULL)
+                AND g.content_type = :ct
+                AND g.status = 'active'
+                AND (g.expires_at IS NULL OR g.expires_at > :now)
+                AND (g.scope_type = 'CONTENT_TYPE' OR (g.scope_type = 'ITEM' AND g.item_uid = c.item_uid))
+            )
+          )
+        ORDER BY c.updated_at DESC
       `);
-      records = stmt.all({ ':ct': contentType });
+      records = stmt.all({
+        ':ct': contentType,
+        ':requester': req.authContext.handle,
+        ':now': Date.now(),
+      });
     } else {
+      if (!authService.can(Permission.READ, req.authContext.handle, owner, contentType)) {
+        return res.status(403).json({ error: 'Forbidden', message: 'No read permission on requested target' });
+      }
       const stmt = syncService.db.prepare(`
         SELECT owner_handle, item_uid, display_name, current_version, current_checksum, updated_at
         FROM config_records

@@ -22,10 +22,8 @@ export class SettingsAdapter extends JsonConfigAdapter {
     if (directories?.user) {
       return path.join(directories.user, 'settings.json');
     }
-    if (directories?.handle) {
-      return path.join(process.cwd(), 'data', directories.handle, 'settings.json');
-    }
-    return path.join(process.cwd(), 'data', 'default-user', 'settings.json');
+    const userHandle = directories?.handle || 'default-user';
+    return path.join(process.cwd(), 'data', userHandle, 'settings.json');
   }
 
   async getFilePath(directories) {
@@ -34,17 +32,12 @@ export class SettingsAdapter extends JsonConfigAdapter {
       return primary;
     }
 
+    const userHandle = directories?.handle || 'default-user';
     const candidates = [
       primary,
       directories?.root ? path.join(directories.root, 'settings.json') : null,
       directories?.user ? path.join(directories.user, 'settings.json') : null,
-      directories?.user ? path.join(path.dirname(directories.user), 'settings.json') : null,
-      directories?.handle ? path.join(process.cwd(), 'data', directories.handle, 'settings.json') : null,
-      path.join(process.cwd(), 'data', directories?.handle || 'default-user', 'settings.json'),
-      path.join(process.cwd(), 'data', 'default-user', 'settings.json'),
-      path.join(process.cwd(), 'data', 'default', 'settings.json'),
-      path.join(process.cwd(), 'public', 'settings.json'),
-      path.join(process.cwd(), 'settings.json'),
+      path.join(process.cwd(), 'data', userHandle, 'settings.json'),
     ];
 
     for (const p of candidates) {
@@ -209,25 +202,33 @@ export function createP0Adapters() {
   adapters.set('settings', new SettingsAdapter());
 
   // OpenAI Presets
+  const resolveUserDirs = (dirs, dirKey, subDirName) => {
+    const userHandle = dirs?.handle || 'default-user';
+    const primary = dirs?.[dirKey]
+      || dirs?.[subDirName]
+      || (dirs?.root ? path.join(dirs.root, subDirName) : null)
+      || (dirs?.user ? path.join(dirs.user, subDirName) : null)
+      || path.join(process.cwd(), 'data', userHandle, subDirName);
+
+    const candidates = Array.from(new Set([
+      primary,
+      dirs?.[dirKey],
+      dirs?.[subDirName],
+      dirs?.root ? path.join(dirs.root, subDirName) : null,
+      dirs?.user ? path.join(dirs.user, subDirName) : null,
+      path.join(process.cwd(), 'data', userHandle, subDirName),
+    ].filter(Boolean)));
+
+    return { primary, candidates };
+  };
+
+  // OpenAI Presets
   adapters.set(
     'openai_preset',
     new DirectoryJsonConfigAdapter(
       'openai_preset',
-      (dirs) => dirs?.openAI_Settings || dirs?.['OpenAI Settings'] || (dirs?.root ? path.join(dirs.root, 'OpenAI Settings') : path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'OpenAI Settings')),
-      (dirs) => [
-        dirs?.openAI_Settings,
-        dirs?.['OpenAI Settings'],
-        dirs?.root ? path.join(dirs.root, 'OpenAI Settings') : null,
-        dirs?.user ? path.join(dirs.user, 'OpenAI Settings') : null,
-        dirs?.user ? path.join(path.dirname(dirs.user), 'OpenAI Settings') : null,
-        path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'OpenAI Settings'),
-        path.join(process.cwd(), 'data', 'default-user', 'OpenAI Settings'),
-        path.join(process.cwd(), 'data', 'default', 'OpenAI Settings'),
-        path.join(process.cwd(), 'public', 'OpenAI Settings'),
-        path.join(process.cwd(), 'default', 'OpenAI Settings'),
-        path.join(process.cwd(), 'public', 'presets', 'openai'),
-        path.join(process.cwd(), 'default', 'content', 'presets', 'openai'),
-      ].filter(Boolean),
+      (dirs) => resolveUserDirs(dirs, 'openAI_Settings', 'OpenAI Settings').primary,
+      (dirs) => resolveUserDirs(dirs, 'openAI_Settings', 'OpenAI Settings').candidates,
       ReloadStrategy.PRESET_LIST
     )
   );
@@ -237,21 +238,8 @@ export function createP0Adapters() {
     'textgen_preset',
     new DirectoryJsonConfigAdapter(
       'textgen_preset',
-      (dirs) => dirs?.textGen_Settings || dirs?.['TextGen Settings'] || (dirs?.root ? path.join(dirs.root, 'TextGen Settings') : path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'TextGen Settings')),
-      (dirs) => [
-        dirs?.textGen_Settings,
-        dirs?.['TextGen Settings'],
-        dirs?.root ? path.join(dirs.root, 'TextGen Settings') : null,
-        dirs?.user ? path.join(dirs.user, 'TextGen Settings') : null,
-        dirs?.user ? path.join(path.dirname(dirs.user), 'TextGen Settings') : null,
-        path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'TextGen Settings'),
-        path.join(process.cwd(), 'data', 'default-user', 'TextGen Settings'),
-        path.join(process.cwd(), 'data', 'default', 'TextGen Settings'),
-        path.join(process.cwd(), 'public', 'TextGen Settings'),
-        path.join(process.cwd(), 'default', 'TextGen Settings'),
-        path.join(process.cwd(), 'public', 'presets', 'textgen'),
-        path.join(process.cwd(), 'default', 'content', 'presets', 'textgen'),
-      ].filter(Boolean),
+      (dirs) => resolveUserDirs(dirs, 'textGen_Settings', 'TextGen Settings').primary,
+      (dirs) => resolveUserDirs(dirs, 'textGen_Settings', 'TextGen Settings').candidates,
       ReloadStrategy.PRESET_LIST
     )
   );
@@ -261,21 +249,8 @@ export function createP0Adapters() {
     'novel_preset',
     new DirectoryJsonConfigAdapter(
       'novel_preset',
-      (dirs) => dirs?.novelAI_Settings || dirs?.['NovelAI Settings'] || (dirs?.root ? path.join(dirs.root, 'NovelAI Settings') : path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'NovelAI Settings')),
-      (dirs) => [
-        dirs?.novelAI_Settings,
-        dirs?.['NovelAI Settings'],
-        dirs?.root ? path.join(dirs.root, 'NovelAI Settings') : null,
-        dirs?.user ? path.join(dirs.user, 'NovelAI Settings') : null,
-        dirs?.user ? path.join(path.dirname(dirs.user), 'NovelAI Settings') : null,
-        path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'NovelAI Settings'),
-        path.join(process.cwd(), 'data', 'default-user', 'NovelAI Settings'),
-        path.join(process.cwd(), 'data', 'default', 'NovelAI Settings'),
-        path.join(process.cwd(), 'public', 'NovelAI Settings'),
-        path.join(process.cwd(), 'default', 'NovelAI Settings'),
-        path.join(process.cwd(), 'public', 'presets', 'novel'),
-        path.join(process.cwd(), 'default', 'content', 'presets', 'novel'),
-      ].filter(Boolean),
+      (dirs) => resolveUserDirs(dirs, 'novelAI_Settings', 'NovelAI Settings').primary,
+      (dirs) => resolveUserDirs(dirs, 'novelAI_Settings', 'NovelAI Settings').candidates,
       ReloadStrategy.PRESET_LIST
     )
   );
@@ -285,21 +260,8 @@ export function createP0Adapters() {
     'kobold_preset',
     new DirectoryJsonConfigAdapter(
       'kobold_preset',
-      (dirs) => dirs?.koboldAI_Settings || dirs?.['KoboldAI Settings'] || (dirs?.root ? path.join(dirs.root, 'KoboldAI Settings') : path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'KoboldAI Settings')),
-      (dirs) => [
-        dirs?.koboldAI_Settings,
-        dirs?.['KoboldAI Settings'],
-        dirs?.root ? path.join(dirs.root, 'KoboldAI Settings') : null,
-        dirs?.user ? path.join(dirs.user, 'KoboldAI Settings') : null,
-        dirs?.user ? path.join(path.dirname(dirs.user), 'KoboldAI Settings') : null,
-        path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'KoboldAI Settings'),
-        path.join(process.cwd(), 'data', 'default-user', 'KoboldAI Settings'),
-        path.join(process.cwd(), 'data', 'default', 'KoboldAI Settings'),
-        path.join(process.cwd(), 'public', 'KoboldAI Settings'),
-        path.join(process.cwd(), 'default', 'KoboldAI Settings'),
-        path.join(process.cwd(), 'public', 'presets', 'kobold'),
-        path.join(process.cwd(), 'default', 'content', 'presets', 'kobold'),
-      ].filter(Boolean),
+      (dirs) => resolveUserDirs(dirs, 'koboldAI_Settings', 'KoboldAI Settings').primary,
+      (dirs) => resolveUserDirs(dirs, 'koboldAI_Settings', 'KoboldAI Settings').candidates,
       ReloadStrategy.PRESET_LIST
     )
   );
@@ -309,19 +271,8 @@ export function createP0Adapters() {
     'world',
     new DirectoryJsonConfigAdapter(
       'world',
-      (dirs) => dirs?.worlds || (dirs?.root ? path.join(dirs.root, 'worlds') : path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'worlds')),
-      (dirs) => [
-        dirs?.worlds,
-        dirs?.root ? path.join(dirs.root, 'worlds') : null,
-        dirs?.user ? path.join(dirs.user, 'worlds') : null,
-        dirs?.user ? path.join(path.dirname(dirs.user), 'worlds') : null,
-        path.join(process.cwd(), 'data', dirs?.handle || 'default-user', 'worlds'),
-        path.join(process.cwd(), 'data', 'default-user', 'worlds'),
-        path.join(process.cwd(), 'data', 'default', 'worlds'),
-        path.join(process.cwd(), 'public', 'worlds'),
-        path.join(process.cwd(), 'default', 'worlds'),
-        path.join(process.cwd(), 'default', 'content', 'worlds'),
-      ].filter(Boolean),
+      (dirs) => resolveUserDirs(dirs, 'worlds', 'worlds').primary,
+      (dirs) => resolveUserDirs(dirs, 'worlds', 'worlds').candidates,
       ReloadStrategy.WORLD_INFO
     )
   );

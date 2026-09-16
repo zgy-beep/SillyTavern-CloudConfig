@@ -79,59 +79,29 @@ export class ClientSyncManager {
   }
 
   /**
-   * 将本地配置推送到云端
-   * 遇到版本冲突时自动以服务端最新版本为基线重试一次，静默创建新版本
+   * 将本地配置推送到云端（带 CAS 校验）
    */
   async pushLocal(binding, localPayload) {
-    const doPush = async (baseVersion) => {
-      return this.api.push({
+    try {
+      const res = await this.api.push({
         contentType: binding.content_type,
         itemUid: binding.item_uid,
         displayName: binding.display_name,
-        baseVersion,
+        baseVersion: binding.last_synced_version || 0,
         operation: 'UPSERT',
         payload: localPayload,
         clientId: this.clientId,
       });
-    };
 
-    const onSuccess = async (res) => {
       binding.last_synced_version = res.version;
       binding.last_notified_version = res.version;
       binding.last_synced_checksum = res.checksum;
       binding.state = SyncState.SYNCED;
       await this.storage.saveBinding(binding);
-      return { success: true, version: res.version };
-    };
 
-    try {
-      const res = await doPush(binding.last_synced_version || 0);
-      return await onSuccess(res);
+      return { success: true, version: res.version };
     } catch (err) {
       if (err.status === 409) {
-        // 自动重试：以服务端当前版本为基线，直接创建新版本
-        const serverVersion = err.data?.server_version;
-        if (serverVersion) {
-          try {
-            const retryRes = await doPush(serverVersion);
-            return await onSuccess(retryRes);
-          } catch (retryErr) {
-            // 极端罕见：重试也失败，回退到冲突对话框
-            if (retryErr.status === 409) {
-              binding.state = SyncState.CONFLICT;
-              binding.last_notified_version = retryErr.data?.server_version || serverVersion;
-              await this.storage.saveBinding(binding);
-              return {
-                success: false,
-                conflict: true,
-                serverVersion: retryErr.data?.server_version,
-                isDeleted: retryErr.data?.is_deleted,
-              };
-            }
-            throw retryErr;
-          }
-        }
-        // 无 server_version 信息，直接回退到冲突对话框
         binding.state = SyncState.CONFLICT;
         binding.last_notified_version = err.data?.server_version || (binding.last_synced_version + 1);
         await this.storage.saveBinding(binding);
@@ -143,7 +113,6 @@ export class ClientSyncManager {
         };
       }
       throw err;
-    }
   }
 
   /**
