@@ -27,6 +27,43 @@ export const AllP0ContentTypes = [
   'world',
 ];
 
+/**
+ * 跨账号禁止共享的敏感类别黑名单
+ * settings 包含 API 密钥、密码等敏感信息，任何情况下禁止跨账号读取或共享
+ */
+export const NON_SHAREABLE_CONTENT_TYPES = Object.freeze(['settings']);
+
+/**
+ * 允许跨账号共享的类别白名单
+ */
+export const SHAREABLE_CONTENT_TYPES = Object.freeze([
+  'openai_preset',
+  'world',
+  'textgen_preset',
+  'novel_preset',
+  'kobold_preset',
+  'character',
+  'instruct',
+  'context',
+  'sysprompt',
+  'reasoning',
+  'quick_replies',
+  'background',
+  'avatar',
+  'sprites',
+  'theme',
+  'workflow',
+]);
+
+/**
+ * 校验指定类别是否允许跨账号共享
+ * @param {string} contentType
+ * @returns {boolean}
+ */
+export function isShareableContentType(contentType) {
+  return Boolean(contentType && !NON_SHAREABLE_CONTENT_TYPES.includes(contentType));
+}
+
 export const OperationType = {
   UPSERT: 'UPSERT',
   DELETE: 'DELETE',

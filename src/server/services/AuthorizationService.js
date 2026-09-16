@@ -1,4 +1,4 @@
-import { Permission } from '../../common/constants.js';
+import { Permission, isShareableContentType } from '../../common/constants.js';
 
 /**
  * 权限控制服务
@@ -18,6 +18,7 @@ export class AuthorizationService {
       WHERE owner_handle = :owner
         AND (grantee_handle = :grantee OR grantee_handle IS NULL)
         AND content_type = :contentType
+        AND content_type <> 'settings'
         AND status = 'active'
         AND (expires_at IS NULL OR expires_at > :now)
         AND (
@@ -52,8 +53,8 @@ export class AuthorizationService {
       return false;
     }
 
-    // 通用设置（settings）包含 API Key 等私有敏感信息，禁止跨账号未授权共享读取
-    if (contentType === 'settings') {
+    // 通用设置（settings 等敏感类别）包含 API Key 等私有敏感信息，禁止跨账号共享读取
+    if (!isShareableContentType(contentType)) {
       return false;
     }
 
@@ -65,6 +66,9 @@ export class AuthorizationService {
    * 查询是否存在有效的授权记录
    */
   hasApprovedGrant(ownerHandle, requesterHandle, contentType, itemUid) {
+    if (!isShareableContentType(contentType)) {
+      return false;
+    }
     const now = Date.now();
     const row = this.stmtCheckGrant.get({
       ':owner': ownerHandle,

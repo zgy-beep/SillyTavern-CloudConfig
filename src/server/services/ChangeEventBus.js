@@ -19,14 +19,18 @@ export class ChangeEventBus {
       WHERE e.seq > :since
         AND (
           e.owner_handle = :requester
-          OR EXISTS (
-            SELECT 1 FROM share_grants g
-            WHERE g.owner_handle = e.owner_handle
-              AND g.grantee_handle = :requester
-              AND g.content_type = e.content_type
-              AND g.status = 'active'
-              AND (g.expires_at IS NULL OR g.expires_at > :now)
-              AND (g.scope_type = 'CONTENT_TYPE' OR (g.scope_type = 'ITEM' AND g.item_uid = e.item_uid))
+          OR (
+            e.content_type <> 'settings'
+            AND EXISTS (
+              SELECT 1 FROM share_grants g
+              WHERE g.owner_handle = e.owner_handle
+                AND (g.grantee_handle = :requester OR g.grantee_handle IS NULL)
+                AND g.content_type = e.content_type
+                AND g.content_type <> 'settings'
+                AND g.status = 'active'
+                AND (g.expires_at IS NULL OR g.expires_at > :now)
+                AND (g.scope_type = 'CONTENT_TYPE' OR (g.scope_type = 'ITEM' AND g.item_uid = e.item_uid))
+            )
           )
         )
       ORDER BY e.seq ASC

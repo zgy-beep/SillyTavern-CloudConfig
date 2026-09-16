@@ -202,6 +202,64 @@ test('Integration: Express Router Endpoints', async (t) => {
     assert.deepEqual(dataWorld.owners, []);
   });
 
+  await t.test('13. NEW-04: Non-shareable categories (settings) are never listed in /owners or items?all_owners even with active grants', async () => {
+    const bobSettingsUid = makeItemUid('settings', 'bob_settings.json');
+    const now = Date.now();
+
+    // 1. bob 拥有一个 settings 云记录
+    dbClient.prepare(`
+      INSERT INTO config_records (owner_handle, content_type, item_uid, display_name, current_version, current_checksum, updated_at, is_deleted)
+      VALUES ('bob', 'settings', :uid, 'Bob Settings', 1, 'dummy_hash', :now, 0)
+    `).run({ ':uid': bobSettingsUid, ':now': now });
+
+    // 2. 插入 bob 的 settings 公开/私有 share_grant (模拟异常或历史遗留授权)
+    dbClient.prepare(`
+      INSERT INTO share_grants (owner_handle, grantee_handle, content_type, scope_type, grant_method, status, created_at)
+      VALUES ('bob', NULL, 'settings', 'CONTENT_TYPE', 'DIRECT', 'active', :now)
+    `).run({ ':now': now });
+
+    // 3. alice 视角验证：
+    // (a) 拉取必须 403 Forbidden
+    const pullRes = await fetch(`${baseUrl}/pull?content_type=settings&item_uid=${bobSettingsUid}&owner=bob`);
+    assert.equal(pullRes.status, 403);
+
+    // (b) items?all_owners=true 不得泄露 bob 的 settings
+    const itemsRes = await fetch(`${baseUrl}/items?content_type=settings&scope=cloud&all_owners=true`);
+    assert.equal(itemsRes.status, 200);
+    const itemsData = await itemsRes.json();
+    const itemOwners = itemsData.items.map(i => i.owner_handle);
+    assert.ok(itemOwners.includes('alice'));
+    assert.ok(!itemOwners.includes('bob'), 'items?all_owners must NOT include bob settings');
+
+    // (c) /owners?content_type=settings 不得列出 bob
+    const ownersSettingsRes = await fetch(`${baseUrl}/owners?content_type=settings`);
+    assert.equal(ownersSettingsRes.status, 200);
+    const ownersSettingsData = await ownersSettingsRes.json();
+    assert.deepEqual(ownersSettingsData.owners, ['alice']);
+
+    // (d) /owners (无参数) 因 bob 仅有 settings 授权，也不应将 bob 列为有效共享源
+    const ownersAllRes = await fetch(`${baseUrl}/owners`);
+    assert.equal(ownersAllRes.status, 200);
+    const ownersAllData = await ownersAllRes.json();
+    assert.ok(!ownersAllData.owners.includes('bob'), '/owners must not list bob when only settings grant exists');
+
+    // 4. 当 bob 授权了合法可共享类别 (如 openai_preset)
+    dbClient.prepare(`
+      INSERT INTO share_grants (owner_handle, grantee_handle, content_type, scope_type, grant_method, status, created_at)
+      VALUES ('bob', NULL, 'openai_preset', 'CONTENT_TYPE', 'DIRECT', 'active', :now)
+    `).run({ ':now': now });
+
+    // /owners (无参数) 现在应当列出 bob
+    const ownersAfterPresetRes = await fetch(`${baseUrl}/owners`);
+    const ownersAfterPresetData = await ownersAfterPresetRes.json();
+    assert.ok(ownersAfterPresetData.owners.includes('bob'));
+
+    // 但 /owners?content_type=settings 依然严格不包含 bob
+    const ownersSettingsStillRes = await fetch(`${baseUrl}/owners?content_type=settings`);
+    const ownersSettingsStillData = await ownersSettingsStillRes.json();
+    assert.deepEqual(ownersSettingsStillData.owners, ['alice']);
+  });
+
   // 关闭服务
   server.close();
   dbClient.close();

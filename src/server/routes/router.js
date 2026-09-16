@@ -62,6 +62,7 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
         SELECT DISTINCT owner_handle FROM share_grants
         WHERE (grantee_handle = :requester OR grantee_handle IS NULL)
           AND content_type = :ct
+          AND content_type <> 'settings'
           AND status = 'active'
           AND (expires_at IS NULL OR expires_at > :now)
         ORDER BY owner_handle ASC
@@ -74,6 +75,7 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
         UNION
         SELECT DISTINCT owner_handle FROM share_grants
         WHERE (grantee_handle = :requester OR grantee_handle IS NULL)
+          AND content_type <> 'settings'
           AND status = 'active'
           AND (expires_at IS NULL OR expires_at > :now)
         ORDER BY owner_handle ASC
@@ -115,20 +117,25 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
     let records = [];
     if (isAllOwners) {
       // 仅查询当前用户自身的数据，以及授权给当前用户的云端数据，绝不泄露全站未授权用户数据
+      // 敏感类别（如 settings）绝对禁止跨账号共享，即使存在授权记录也不在列表中展示
       const stmt = syncService.db.prepare(`
         SELECT DISTINCT c.owner_handle, c.item_uid, c.display_name, c.current_version, c.current_checksum, c.updated_at
         FROM config_records c
         WHERE c.content_type = :ct AND c.is_deleted = 0
           AND (
             c.owner_handle = :requester
-            OR EXISTS (
-              SELECT 1 FROM share_grants g
-              WHERE g.owner_handle = c.owner_handle
-                AND (g.grantee_handle = :requester OR g.grantee_handle IS NULL)
-                AND g.content_type = :ct
-                AND g.status = 'active'
-                AND (g.expires_at IS NULL OR g.expires_at > :now)
-                AND (g.scope_type = 'CONTENT_TYPE' OR (g.scope_type = 'ITEM' AND g.item_uid = c.item_uid))
+            OR (
+              :ct <> 'settings'
+              AND EXISTS (
+                SELECT 1 FROM share_grants g
+                WHERE g.owner_handle = c.owner_handle
+                  AND (g.grantee_handle = :requester OR g.grantee_handle IS NULL)
+                  AND g.content_type = :ct
+                  AND g.content_type <> 'settings'
+                  AND g.status = 'active'
+                  AND (g.expires_at IS NULL OR g.expires_at > :now)
+                  AND (g.scope_type = 'CONTENT_TYPE' OR (g.scope_type = 'ITEM' AND g.item_uid = c.item_uid))
+              )
             )
           )
         ORDER BY c.updated_at DESC
