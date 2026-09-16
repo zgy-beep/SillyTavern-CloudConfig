@@ -34,15 +34,18 @@
 
 | 配置类别 | 说明 | 当前状态 |
 | :--- | :--- | :---: |
-| **settings** | SillyTavern 主配置文件 (`settings.json`) | ✅ 已支持 |
-| **openai_preset** | OpenAI 接口预设 | ✅ 已支持 |
-| **textgen_preset** | TextGen 接口预设 | ✅ 已支持 |
-| **novel_preset** | NovelAI 接口预设 | ✅ 已支持 |
-| **kobold_preset** | KoboldAI 接口预设 | ✅ 已支持 |
-| **world** | 世界书 / Lorebooks (`.json`) | ✅ 已支持 |
+| **settings** | SillyTavern 主配置文件 (`settings.json`) | ✅ 已支持（UI 默认展示） |
+| **openai_preset** | OpenAI 接口预设 | ✅ 已支持（UI 默认展示） |
+| **world** | 世界书 / Lorebooks (`.json`) | ✅ 已支持（UI 默认展示） |
+| **textgen / novel / kobold** | 本地模型与特定服务预设 | 📦 代码已支持（默认折叠隐藏） |
+| **跨账号分享管理界面** | 分享码与权限审批 UI 交互 | 🚧 规划中 (Phase 2) |
 | **character** | 角色卡卡片数据 | 🚧 规划中 (Phase 2) |
 | **instruct / context** | Instruct 模板与上下文配置 | 🚧 规划中 (Phase 2) |
 | **background / avatar** | 背景、头像等二进制资源 | ⏳ 规划中 (Phase 3) |
+
+> **说明**：
+> 1. **Phase 1（当前阶段）** 核心目标为**原子 CAS 同步引擎、安全物理隔离与多版本管理**；跨账号分享码的 UI 创建与审批流程将在 Phase 2 完整推出。
+> 2. **软删除语义**：当云端配置项被标记为软删除（墓碑状态）后，常规拉取最新版会返回 `404 Not Found`（防止离线设备复活已删除配置）；如需找回，支持传入具体历史版本号拉取恢复。
 
 ---
 

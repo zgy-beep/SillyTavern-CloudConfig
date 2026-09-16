@@ -8,6 +8,9 @@ const DB_VERSION = 1;
 
 export function getClientInstanceId() {
   const KEY = 'st_cfgsync_client_id';
+  if (typeof localStorage === 'undefined') {
+    return 'client_node_env';
+  }
   let id = localStorage.getItem(KEY);
   if (!id) {
     id = 'client_' + (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));

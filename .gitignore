@@ -33,4 +33,5 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
-
+# Local symlinks & artifacts
+cfgsync

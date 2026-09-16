@@ -113,6 +113,7 @@ export class ClientSyncManager {
         };
       }
       throw err;
+    }
   }
 
   /**
