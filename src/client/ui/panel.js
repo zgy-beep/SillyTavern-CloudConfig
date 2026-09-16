@@ -466,12 +466,12 @@ export class CloudConfigPanel {
 
     const pushBtn = row.querySelector('.cfgsync-push-btn');
     if (pushBtn) {
-      pushBtn.disabled = !existsLocally || !isEnabled;
+      pushBtn.disabled = !existsLocally;
     }
 
     const pullBtn = row.querySelector('.cfgsync-pull-btn');
     if (pullBtn) {
-      pullBtn.disabled = !cItem && !isEnabled;
+      pullBtn.disabled = !cItem;
     }
 
     const toggle = row.querySelector('.cfgsync-toggle');
@@ -511,8 +511,8 @@ export class CloudConfigPanel {
         <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center;">
           ${this.renderVersionSelectorHtml(state, version, item.cloudItem, initialBinding)}
         </div>
-        <button class="cfgsync-push-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${(!row._existsLocally || !isEnabled) ? 'disabled' : ''}>推云端</button>
-        <button class="cfgsync-pull-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${(!item.cloudItem && !isEnabled) ? 'disabled' : ''}>拉云端</button>
+        <button class="cfgsync-push-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${!row._existsLocally ? 'disabled' : ''}>推云端</button>
+        <button class="cfgsync-pull-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${!item.cloudItem ? 'disabled' : ''}>拉云端</button>
       </div>
     `;
 
@@ -523,7 +523,7 @@ export class CloudConfigPanel {
       versionSelect.addEventListener('mousedown', () => this.loadVersionOptions(row), { once: true });
     }
 
-    // 勾选切换开关
+    // 勾选切换开关（纯粹的状态标记，关闭时直接取消跟踪，不弹窗、不还原覆盖本地配置）
     const toggle = row.querySelector('.cfgsync-toggle');
     toggle.onchange = async () => {
       toggle.disabled = true;
@@ -533,10 +533,9 @@ export class CloudConfigPanel {
           const binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
           this.updateRowState(row, binding, row._cloudItem, row._existsLocally);
         } else {
-          const confirmRestore = confirm(`是否在关闭同步时恢复为开启同步前的本地原始配置？\n点击【确定】恢复备份，点击【取消】保留当前配置。`);
           const sourceOwner = row._binding?.source_owner_handle || row._cloudItem?.owner_handle || this.accountHandle;
           const bindingUid = this.storage.makeBindingUid(this.accountHandle, sourceOwner, contentType, item.itemUid);
-          const binding = await this.syncManager.disableSync(bindingUid, confirmRestore);
+          const binding = await this.syncManager.disableSync(bindingUid, false);
           this.updateRowState(row, binding, row._cloudItem, row._existsLocally);
         }
       } catch (err) {
@@ -548,10 +547,10 @@ export class CloudConfigPanel {
       }
     };
 
-    // 手动推送到云端
+    // 手动推送到云端（本地存在即可直接推送，自动激活同步标记）
     const pushBtn = row.querySelector('.cfgsync-push-btn');
     pushBtn.onclick = async () => {
-      if (!row._binding) {
+      if (!row._binding || !row._binding.enabled) {
         const sourceOwner = row._cloudItem?.owner_handle || this.accountHandle;
         row._binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
       }
@@ -588,7 +587,7 @@ export class CloudConfigPanel {
       } catch (e) {
         alert(`推送失败: ${e.message}`);
       } finally {
-        pushBtn.disabled = !row._binding?.enabled;
+        pushBtn.disabled = !row._existsLocally;
         pushBtn.textContent = origText;
       }
     };
@@ -596,7 +595,7 @@ export class CloudConfigPanel {
     // 手动从云端拉取（支持跨账号从任意云端备份拉取并写入本地，支持选择历史版本）
     const pullBtn = row.querySelector('.cfgsync-pull-btn');
     pullBtn.onclick = async () => {
-      if (!row._binding) {
+      if (!row._binding || !row._binding.enabled) {
         const sourceOwner = row._cloudItem?.owner_handle || this.accountHandle;
         row._binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
       }
