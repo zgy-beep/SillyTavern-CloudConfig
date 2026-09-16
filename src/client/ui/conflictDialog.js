@@ -19,33 +19,55 @@ export function showConflictDialog({
   modal.style.cssText = `
     background: var(--SmartThemeBodyColor, #20232a);
     color: var(--SmartThemeQuoteColor, #f0f0f0);
-    padding: 24px; border-radius: 8px; max-width: 480px; width: 90%;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5); border: 1px solid #ff4d4f;
+    padding: 24px; border-radius: 10px; max-width: 420px; width: 90%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6); border: 1px solid rgba(255, 77, 79, 0.5);
+  `;
+
+  // 强制覆盖 menu_button 的共用按钮样式，避免被酒馆 CSS 压缩按钮宽度
+  const btnBase = `
+    display: flex !important; align-items: center !important; justify-content: flex-start !important;
+    gap: 10px !important; width: 100% !important; box-sizing: border-box !important;
+    padding: 12px 16px !important; border-radius: 6px !important; cursor: pointer !important;
+    font-size: 13px !important; font-weight: 500 !important; line-height: 1.4 !important;
+    white-space: normal !important; text-align: left !important; border: none !important;
+    min-width: unset !important; max-width: 100% !important;
+    transition: filter 0.15s ease !important;
   `;
 
   modal.innerHTML = `
-    <h3 style="margin-top:0; color: #ff4d4f; display:flex; align-items:center; gap:8px;">
-      ⚠️ 云端配置冲突
-    </h3>
-    <p style="font-size: 14px; line-height: 1.6;">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+      <span style="font-size:20px;">⚠️</span>
+      <span style="font-size:16px; font-weight:700; color:#ff4d4f;">云端配置冲突</span>
+    </div>
+    <p style="font-size:13px; line-height:1.7; margin:0 0 20px 0; opacity:0.9;">
       配置项 <strong>${displayName}</strong> 已被其它设备更新（云端当前版本：<strong>v${serverVersion}</strong>）。<br>
-      为了防止静默覆盖导致数据丢失，请选择处理策略：
+      为防止静默覆盖导致数据丢失，请选择处理策略：
     </p>
-    <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 20px;">
-      <button id="cfgsync-pull-btn" class="menu_button" style="background:#1890ff; color:white; border:none; padding:10px; border-radius:4px; cursor:pointer;">
-        📥 拉取云端最新版本（覆盖本地）
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <button id="cfgsync-pull-btn" class="menu_button" style="${btnBase} background:#1890ff !important; color:#fff !important;">
+        <span style="font-size:18px; flex-shrink:0;">📥</span>
+        <span>拉取云端最新版本（覆盖本地）</span>
       </button>
-      <button id="cfgsync-overwrite-btn" class="menu_button" style="background:#faad14; color:#222; border:none; padding:10px; border-radius:4px; cursor:pointer;">
-        ⚠️ 仍然覆盖云端（不推荐）
+      <button id="cfgsync-overwrite-btn" class="menu_button" style="${btnBase} background:rgba(250,173,20,0.15) !important; color:#faad14 !important; border:1px solid rgba(250,173,20,0.4) !important;">
+        <span style="font-size:18px; flex-shrink:0;">⚠️</span>
+        <span>仍然覆盖云端（不推荐）</span>
       </button>
-      <button id="cfgsync-cancel-btn" class="menu_button" style="background:#555; color:white; border:none; padding:10px; border-radius:4px; cursor:pointer;">
-        ✖ 取消，稍后手动处理
+      <button id="cfgsync-cancel-btn" class="menu_button" style="${btnBase} background:rgba(255,255,255,0.06) !important; color:rgba(255,255,255,0.7) !important; border:1px solid rgba(255,255,255,0.12) !important;">
+        <span style="font-size:18px; flex-shrink:0;">✖</span>
+        <span>取消，稍后手动处理</span>
       </button>
     </div>
   `;
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
+
+  // 点击遮罩层关闭（等同取消）
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      close('CANCEL');
+    }
+  });
 
   const close = (choice) => {
     document.body.removeChild(overlay);
@@ -56,3 +78,4 @@ export function showConflictDialog({
   modal.querySelector('#cfgsync-overwrite-btn').onclick = () => close('OVERWRITE_CLOUD');
   modal.querySelector('#cfgsync-cancel-btn').onclick = () => close('CANCEL');
 }
+
