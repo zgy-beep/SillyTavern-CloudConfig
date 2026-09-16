@@ -122,9 +122,19 @@ export class CloudConfigPanel {
         }
       }
 
-      const p0Types = typeRes.groups?.P0 || [];
+      // 仅展示常用的通用配置（settings, openai_preset, world）；保留 textgen/novel/kobold 适配器代码备用
+      const defaultActiveTypes = new Set(['settings', 'openai_preset', 'world']);
+      const p0Types = (typeRes.groups?.P0 || []).filter(ct => defaultActiveTypes.has(ct));
       const bindings = await this.storage.getBindingsByAccount(this.accountHandle);
       const bindingMap = new Map(bindings.map(b => [`${b.content_type}:${b.item_uid}`, b]));
+
+      // 移除未启用的抽屉分类（若此前已渲染在界面中）
+      const activeCtSet = new Set(p0Types);
+      treeEl.querySelectorAll('.cfgsync-group-drawer').forEach(drawer => {
+        if (!activeCtSet.has(drawer.dataset.contentType)) {
+          drawer.remove();
+        }
+      });
 
       const ctNameMap = {
         'settings': '通用设置 (Settings)',

@@ -11,6 +11,16 @@ export const ContentTypeGroup = {
 export const P0ContentTypes = [
   'settings',
   'openai_preset',
+  'world',
+  // 保留代码备用，默认不展示低频类型：
+  // 'textgen_preset',
+  // 'novel_preset',
+  // 'kobold_preset',
+];
+
+export const AllP0ContentTypes = [
+  'settings',
+  'openai_preset',
   'textgen_preset',
   'novel_preset',
   'kobold_preset',
