@@ -46,23 +46,46 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
     });
   });
 
-  // 1.5 GET /owners
+  // 1.5 GET /owners?content_type=
   router.get('/owners', asyncHandler(async (req, res) => {
     const requester = req.authContext.handle;
-    const stmt = syncService.db.prepare(`
-      SELECT DISTINCT owner_handle FROM config_records 
-      WHERE owner_handle = :requester AND is_deleted = 0
-      UNION
-      SELECT DISTINCT owner_handle FROM share_grants
-      WHERE (grantee_handle = :requester OR grantee_handle IS NULL)
-        AND status = 'active'
-        AND (expires_at IS NULL OR expires_at > :now)
-      ORDER BY owner_handle ASC
-    `);
-    const rows = stmt.all({ ':requester': requester, ':now': Date.now() });
+    const contentType = req.query.content_type;
+
+    let stmt;
+    let params;
+
+    if (contentType) {
+      stmt = syncService.db.prepare(`
+        SELECT DISTINCT owner_handle FROM config_records 
+        WHERE owner_handle = :requester AND content_type = :ct AND is_deleted = 0
+        UNION
+        SELECT DISTINCT owner_handle FROM share_grants
+        WHERE (grantee_handle = :requester OR grantee_handle IS NULL)
+          AND content_type = :ct
+          AND status = 'active'
+          AND (expires_at IS NULL OR expires_at > :now)
+        ORDER BY owner_handle ASC
+      `);
+      params = { ':requester': requester, ':ct': contentType, ':now': Date.now() };
+    } else {
+      stmt = syncService.db.prepare(`
+        SELECT DISTINCT owner_handle FROM config_records 
+        WHERE owner_handle = :requester AND is_deleted = 0
+        UNION
+        SELECT DISTINCT owner_handle FROM share_grants
+        WHERE (grantee_handle = :requester OR grantee_handle IS NULL)
+          AND status = 'active'
+          AND (expires_at IS NULL OR expires_at > :now)
+        ORDER BY owner_handle ASC
+      `);
+      params = { ':requester': requester, ':now': Date.now() };
+    }
+
+    const rows = stmt.all(params);
     res.json({
       owners: rows.map(r => r.owner_handle),
       current_user: requester,
+      content_type: contentType || null,
     });
   }));
 

@@ -188,6 +188,20 @@ test('Integration: Express Router Endpoints', async (t) => {
     assert.equal(data.error, 'ForbiddenError');
   });
 
+  await t.test('12. GET /owners supports content_type filtering', async () => {
+    // 已创建 settings 对象，应包含 alice
+    const resSettings = await fetch(`${baseUrl}/owners?content_type=settings`);
+    assert.equal(resSettings.status, 200);
+    const dataSettings = await resSettings.json();
+    assert.deepEqual(dataSettings.owners, ['alice']);
+
+    // 未创建 world 对象且无授权，不应包含 alice
+    const resWorld = await fetch(`${baseUrl}/owners?content_type=world`);
+    assert.equal(resWorld.status, 200);
+    const dataWorld = await resWorld.json();
+    assert.deepEqual(dataWorld.owners, []);
+  });
+
   // 关闭服务
   server.close();
   dbClient.close();
