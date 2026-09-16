@@ -243,9 +243,11 @@ export class ChatAdapter extends ConfigAdapter {
           const sourceRef = entry.name;
           if (!seenFiles.has(sourceRef)) {
             seenFiles.add(sourceRef);
+            const chatName = path.basename(entry.name, '.jsonl');
             items.push({
               itemUid: makeItemUid(this.contentType, sourceRef),
-              displayName: path.basename(entry.name, '.jsonl'),
+              displayName: chatName,
+              chatName,
               sourceRef,
               actualDir: baseDir,
             });
@@ -273,6 +275,8 @@ export class ChatAdapter extends ConfigAdapter {
                 items.push({
                   itemUid: makeItemUid(this.contentType, sourceRef),
                   displayName: `${entry.name} / ${chatName}`,
+                  characterName: entry.name,
+                  chatName,
                   sourceRef,
                   actualDir: baseDir,
                 });

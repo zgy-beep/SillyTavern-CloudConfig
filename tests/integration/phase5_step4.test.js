@@ -94,8 +94,9 @@ test('Step 4 & TC11: SSE 实时事件流与反代加固 (P5-7, N-7, N-12)', asyn
     assert.equal(res.headers['Connection'], 'keep-alive');
     assert.equal(res.headers['X-Accel-Buffering'], 'no');
 
-    // 首字节确认包
+    // 首字节确认包与即时保活心跳 (N-7/N-12)
     assert.ok(res.getAllOutput().includes(':ok\n\n'), 'Must flush :ok\\n\\n immediately on connect');
+    assert.ok(res.getAllOutput().includes(':heartbeat\n\n'), 'Must flush initial :heartbeat\\n\\n immediately on connect');
   });
 
   await t.test('25s 心跳广播 (:heartbeat\\n\\n)', async () => {

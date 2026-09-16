@@ -48,9 +48,9 @@ export class SseService {
     };
     this.clients.add(client);
 
-    // 立即下发初始 ok 确认包，让客户端和反代（包括 curl -N）立即拿到首字节 (N-7/N-12)
+    // 立即下发初始 ok 确认包与即时保活心跳包，让客户端和反代（包括 curl -N / Caddy / Nginx）立即拿到首字节并确立长连 (N-7/N-12)
     try {
-      res.write(':ok\n\n');
+      res.write(':ok\n\n:heartbeat\n\n');
       if (typeof res.flush === 'function') res.flush();
     } catch {}
 

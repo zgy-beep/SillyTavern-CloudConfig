@@ -985,7 +985,12 @@ export class CloudConfigPanel {
         <div style="min-width:0; flex:1; overflow:hidden; display:flex; flex-direction:column; gap:1px;">
           <div title="${item.displayName}" style="font-size:12.5px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? '#f0f6fc' : '#c9d1d9'}; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:flex; align-items:center; gap:6px;">
             ${iconOrAvatarHtml}
-            <span class="cfgsync-row-name" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.displayName}</span>
+            ${contentType === 'chat' && (item.characterName || (item.sourceRef && item.sourceRef.includes('/'))) ? `
+              <span class="cfgsync-chat-char-tag" style="background:rgba(88,166,255,0.18); color:#58a6ff; font-size:10.5px; padding:1px 5px; border-radius:3px; border:1px solid rgba(88,166,255,0.3); font-weight:normal; flex-shrink:0;">${item.characterName || item.sourceRef.split('/')[0]}</span>
+              <span class="cfgsync-row-name" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.chatName || (item.displayName && item.displayName.includes(' / ') ? item.displayName.split(' / ').slice(1).join(' / ') : item.displayName)}</span>
+            ` : `
+              <span class="cfgsync-row-name" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.displayName}</span>
+            `}
           </div>
           <div class="cfgsync-row-ref" data-source-ref="${item.sourceRef}" title="${item.sourceRef}" style="font-size:10.5px; line-height:1.2; color:${hasCloud ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)'}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; padding-left: 26px;">${item.sourceRef}${!hasCloud ? ' · 仅本地' : ''}</div>
         </div>

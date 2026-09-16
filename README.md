@@ -34,17 +34,21 @@
 
 ## 📦 支持的配置类别
 
-| 配置类别 | 说明 | 当前状态 |
-| :--- | :--- | :---: |
-| **settings** | SillyTavern 主配置文件 (`settings.json` 及受控 API Key) | ✅ 已支持（支持家庭共享与密钥注入） |
-| **openai_preset** | OpenAI 接口预设 | ✅ 已支持（时间快照直传与分享） |
-| **world** | 世界书 / Lorebooks (`.json`) | ✅ 已支持（时间快照直传与分享） |
-| **instruct / context / sysprompt / quick_replies** | Instruct 模板与上下文提示词配置 (P1) | ✅ 已支持 |
-| **textgen / novel / kobold** | 本地模型与特定服务预设 | 📦 代码已支持（默认折叠隐藏） |
-| **跨账号分享与认领** | 专属邀请码、全服公开只读、API Key 勾选共享 | ✅ 已支持 |
-| **网盘式快照时间线** | 自定义快照备注、秒级时间戳、文件大小显示、版本回滚 | ✅ 已支持 |
+| 配置类别 | 说明 | 策略 / 版本上限 | 当前状态 |
+| :--- | :--- | :---: | :---: |
+| **settings** | SillyTavern 主配置文件 (`settings.json` 及受控 API Key) | 递归深度合并 (保留本地独有键) / 20 版 | ✅ 已支持（支持家庭共享与密钥注入） |
+| **openai_preset** | OpenAI 接口预设 | 替换覆盖 / 20 版 | ✅ 已支持（时间快照直传与分享） |
+| **world** | 世界书 / Lorebooks (`.json`) | 替换覆盖 / 20 版 | ✅ 已支持（时间快照直传与分享） |
+| **character** | 角色卡 (`.png` / `.webp` / `.json` 包含内嵌元数据) | 原生二进制原子替换 + 本地备份 / 5 版 | ✅ 已支持（P5-1, 头像预览与缩略图缓存） |
+| **theme** | UI 主题样式与色彩配置 | 原生二进制原子替换 + 本地备份 / 5 版 | ✅ 已支持 |
+| **chat** | 聊天历史会话 (`.jsonl`) | APPEND_MERGE 智能增量合并 + 423 会话锁 / 5 版 | ✅ 已支持（N-10 复合键去重, swipes 保序并集） |
+| **instruct / context / sysprompt / quick_replies** | Instruct 模板与上下文提示词配置 (P1) | 替换覆盖 / 20 版 | ✅ 已支持 |
+| **textgen / novel / kobold** | 本地模型与特定服务预设 | 替换覆盖 / 20 版 | 📦 代码已支持（默认折叠隐藏） |
+| **跨账号分享与认领** | 专属邀请码、全服公开只读、API Key 勾选共享 | 权限隔离与只读校验 | ✅ 已支持 |
+| **SSE 实时事件流** | 多端变更秒级广播推流与断线自动回放补发 | Server-Sent Events (25s 心跳保活) | ✅ 已支持 |
+| **管理员存储看板** | 全局与用户配额统计、两阶段孤儿快照清理 | N-8 CAS 真实物理去重统计 | ✅ 已支持 |
 
-> **提示**：拉取通用设置（`settings.json`）后，由于 SillyTavern 服务端在启动初始化时会缓存部分全局设置与 API 密钥，拉取完成后建议根据提示重启 SillyTavern 服务以完全生效。
+> **提示**：拉取通用设置（`settings.json`）后，由于 SillyTavern 服务端在启动初始化时会缓存部分全局设置与 API 密钥，拉取完成后建议根据提示重启 SillyTavern 服务以完全生效。拉取角色卡后，系统会自动刷新酒馆角色列表缓存。
 
 ---
 
@@ -130,6 +134,68 @@ node server.js
 <summary><strong>Q: 拉取共享的通用设置（settings.json）时，如果所有者删除了某个配置项，成员本地会怎么处理？</strong></summary>
 拉取设置时采用<strong>递归深度按键合并</strong>（Deep Merge）策略：优先应用云端所有者的更新，同时严格保留成员本地独有的扩展参数与配置。如果所有者在云端删除了某项配置，该键在成员本地仍会被保留，绝不会被静默抹除。在任何写入落盘前，系统都会自动备份原文件（<code>settings.json.bak-&lt;timestamp&gt;</code>，最多轮转保留 3 份），若需完全与所有者一致，可参照备份手动微调或重置。
 </details>
+
+---
+
+## 🔌 进阶与开发者接口规范
+
+### 1. `/stats` 存储配额与看板接口
+- **管理员权限**：当管理员账号请求 `GET /api/plugins/cfgsync/stats` 时，服务端返回全局统计（含 N-8 物理去重后真实占用 `total_size_bytes`、孤儿快照统计）以及所有用户的配额详情：
+  ```json
+  {
+    "global": {
+      "total_versions": 42,
+      "total_blobs": 38,
+      "total_size_bytes": 10485760,
+      "orphan_blobs": 3,
+      "orphan_size_bytes": 204800
+    },
+    "users": [
+      { "handle": "alice", "versions_count": 25, "total_size_bytes": 6291456, "quota_bytes": 104857600 }
+    ]
+  }
+  ```
+- **普通成员**：普通用户访问时，`global` 字段**显式为 `null`**（严防全局指标越权泄露），响应格式为：
+  ```json
+  {
+    "global": null,
+    "user": {
+      "handle": "bob",
+      "versions_count": 12,
+      "total_size_bytes": 3145728,
+      "quota_bytes": 104857600
+    }
+  }
+  ```
+
+### 2. 二进制配置 (`character` / `theme`) 拉取规范
+当调用 `GET /api/plugins/cfgsync/pull` 拉取角色卡（PNG）或主题等二进制资产时，服务端返回的 JSON 数据结构中 `content` 为 Node.js Buffer 序列化对象：
+```json
+{
+  "version": 1,
+  "item_uid": "...",
+  "content": {
+    "type": "Buffer",
+    "data": [137, 80, 78, 71, 13, 10, 26, 10, ...]
+  }
+}
+```
+- **Node.js 客户端**：使用 `Buffer.from(res.content.data)` 还原原始字节；
+- **浏览器前端**：使用 `new Uint8Array(res.content.data)` 直接构造 `Blob` 或通过 `URL.createObjectURL()` 创建立绘预览。
+
+### 3. `/events` SSE 实时事件流与反代配置
+- **身份鉴权**：浏览器前端直接调用 `new EventSource('/api/plugins/cfgsync/events')` 即可建立长连接。浏览器在跨请求时会自动携带 Session Cookie（无须手动设置 `Authorization` 或 CSRF 头）。
+- **握手与心跳**：客户端连入瞬间，服务端立即下发握手包 `:ok\n\n:heartbeat\n\n` 破除反代首字节缓冲；后续由后台定时器每 25 秒广播 `:heartbeat\n\n` 确保长连接保活。
+- **反向代理配置**：服务端已内置下发 `X-Accel-Buffering: no` 与 `Cache-Control: no-cache, no-transform` 头。
+  - **Nginx 反代用户**建议在 `location /` 或 `location /api/plugins/cfgsync/` 中追加：
+    ```nginx
+    proxy_http_version 1.1;
+    proxy_set_header Connection '';
+    proxy_buffering off;
+    proxy_cache off;
+    chunked_transfer_encoding off;
+    ```
+  - **Caddy 反代用户**无需额外配置，原生支持全双工流式传输。
 
 ---
 
