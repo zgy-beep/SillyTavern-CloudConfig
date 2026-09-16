@@ -135,7 +135,7 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
     if (shouldApply === 'true' || shouldApply === true) {
       const adapter = adapters.get(contentType);
       if (adapter) {
-        await adapter.apply(req.authContext.directories, itemUid, 'UPSERT', result.content);
+        await adapter.apply(req.authContext.directories, itemUid, 'UPSERT', result.content, result.display_name);
       }
     }
     res.json(result);

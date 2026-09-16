@@ -173,7 +173,7 @@ export class DirectoryJsonConfigAdapter extends JsonConfigAdapter {
     return content;
   }
 
-  async apply(directories, itemUid, operation, content) {
+  async apply(directories, itemUid, operation, content, displayName = null) {
     // 写入时严格写向当前用户专有的 primaryDir
     const primaryDir = await this.getPrimaryDir(directories);
     const items = await this.listItems(directories);
@@ -182,7 +182,7 @@ export class DirectoryJsonConfigAdapter extends JsonConfigAdapter {
 
     let targetFileName = (existingInPrimary || existingAny) ? (existingInPrimary || existingAny).sourceRef : null;
     if (!targetFileName) {
-      const name = content?.name || content?.displayName || `cfg_${itemUid.slice(0, 8)}`;
+      const name = displayName || content?.name || content?.displayName || `cfg_${itemUid.slice(0, 8)}`;
       targetFileName = `${name.replace(/[\\/:*?"<>|]/g, '_')}.json`;
     }
     const filePath = path.join(primaryDir, targetFileName);
