@@ -780,6 +780,55 @@ export function createPluginRouter({
     res.json({ logs });
   }));
 
+  // 15. GET /stats (插件看板与存储指标，P5-6, N-8, TC9)
+  router.get('/stats', asyncHandler(async (req, res) => {
+    const isAdmin = Boolean(
+      req.user?.profile?.admin === true ||
+      req.authContext?.rawProfile?.admin === true ||
+      req.authContext?.isAdmin === true
+    );
+    const stats = syncService.getStats(req.authContext.handle, isAdmin);
+    res.json(stats);
+  }));
+
+  // 16. POST /clean-orphans (孤儿快照两阶段安全清理，P5-6, N-8, TC10)
+  router.post('/clean-orphans', asyncHandler(async (req, res) => {
+    const isAdmin = Boolean(
+      req.user?.profile?.admin === true ||
+      req.authContext?.rawProfile?.admin === true ||
+      req.authContext?.isAdmin === true
+    );
+    const { dry_run = true, target_owner = null } = req.body || {};
+    const isDryRun = dry_run === true || dry_run === 'true' || dry_run === undefined;
+
+    // 非管理员仅允许清理自身
+    const ownerHandle = isAdmin ? target_owner : req.authContext.handle;
+
+    const result = await syncService.cleanOrphanSnapshots({
+      ownerHandle,
+      dryRun: isDryRun,
+      isAdmin,
+    });
+
+    if (!isDryRun) {
+      audit?.log({
+        actor: req.authContext.handle,
+        action: 'clean_orphans',
+        target: ownerHandle || 'global',
+        result: 'success',
+        details: {
+          deleted_count: result.deleted_count,
+          freed_bytes: result.freed_bytes,
+        },
+      });
+    }
+
+    res.json({
+      success: true,
+      ...result,
+    });
+  }));
+
   // 统一错误捕获处理（特别是 409 Conflict 与 审计拒绝记录）
   router.use((err, req, res, next) => {
     if (audit && (err.status === 403 || err.status === 429)) {

@@ -775,4 +775,231 @@ export class SyncService {
       ':uid': itemUid,
     });
   }
+
+  /**
+   * 获取存储与配置统计指标 (P5-6, N-8, TC9)
+   * @param {string} requesterHandle
+   * @param {boolean} [isAdmin=false]
+   */
+  getStats(requesterHandle, isAdmin = false) {
+    // 1. 用户自身视角统计
+    const userSummaryStmt = this.db.prepare(`
+      SELECT
+        COUNT(*) as total_versions,
+        COALESCE(SUM(size_bytes), 0) as total_logical_bytes,
+        COUNT(DISTINCT item_uid) as total_items,
+        COUNT(DISTINCT content_type) as total_content_types
+      FROM config_versions
+      WHERE owner_handle = :requester
+    `);
+    const userSummary = userSummaryStmt.get({ ':requester': requesterHandle }) || {};
+
+    const userRecordsStmt = this.db.prepare(`
+      SELECT
+        COUNT(CASE WHEN is_deleted = 0 THEN 1 END) as active_items,
+        COUNT(CASE WHEN is_deleted = 1 THEN 1 END) as deleted_items
+      FROM config_records
+      WHERE owner_handle = :requester
+    `);
+    const userRecords = userRecordsStmt.get({ ':requester': requesterHandle }) || {};
+
+    const userDedupStmt = this.db.prepare(`
+      SELECT
+        COUNT(DISTINCT blob_path) as unique_blobs,
+        COALESCE(SUM(size_bytes), 0) as unique_bytes
+      FROM (
+        SELECT blob_path, size_bytes
+        FROM config_versions
+        WHERE owner_handle = :requester AND blob_path IS NOT NULL
+        GROUP BY blob_path
+      )
+    `);
+    const userDedup = userDedupStmt.get({ ':requester': requesterHandle }) || {};
+
+    const userByTypeStmt = this.db.prepare(`
+      SELECT
+        content_type,
+        COUNT(*) as version_count,
+        COALESCE(SUM(size_bytes), 0) as total_bytes,
+        COUNT(DISTINCT item_uid) as item_count
+      FROM config_versions
+      WHERE owner_handle = :requester
+      GROUP BY content_type
+      ORDER BY total_bytes DESC
+    `);
+    const userByType = userByTypeStmt.all({ ':requester': requesterHandle });
+
+    const userStats = {
+      handle: requesterHandle,
+      total_versions: Number(userSummary.total_versions || 0),
+      total_logical_bytes: Number(userSummary.total_logical_bytes || 0),
+      unique_blobs: Number(userDedup.unique_blobs || 0),
+      unique_bytes: Number(userDedup.unique_bytes || 0),
+      active_items: Number(userRecords.active_items || 0),
+      deleted_items: Number(userRecords.deleted_items || 0),
+      by_type: userByType,
+    };
+
+    // 2. 管理员全站视角（去重后的真实磁盘占用） (N-8)
+    let globalStats = null;
+    if (isAdmin) {
+      const globalSummaryStmt = this.db.prepare(`
+        SELECT
+          COUNT(*) as total_versions,
+          COALESCE(SUM(size_bytes), 0) as total_logical_bytes,
+          COUNT(DISTINCT owner_handle) as total_users,
+          COUNT(DISTINCT item_uid) as total_items,
+          COUNT(CASE WHEN is_locked = 1 THEN 1 END) as locked_versions
+        FROM config_versions
+      `);
+      const globalSummary = globalSummaryStmt.get() || {};
+
+      const globalDedupStmt = this.db.prepare(`
+        SELECT
+          COUNT(DISTINCT blob_path) as deduplicated_blobs,
+          COALESCE(SUM(size_bytes), 0) as deduplicated_disk_bytes
+        FROM (
+          SELECT blob_path, size_bytes
+          FROM config_versions
+          WHERE blob_path IS NOT NULL
+          GROUP BY blob_path
+        )
+      `);
+      const globalDedup = globalDedupStmt.get() || {};
+
+      const globalByTypeStmt = this.db.prepare(`
+        SELECT
+          content_type,
+          COUNT(*) as version_count,
+          COUNT(DISTINCT blob_path) as deduplicated_blob_count,
+          COALESCE(SUM(size_bytes), 0) as logical_bytes
+        FROM config_versions
+        GROUP BY content_type
+        ORDER BY logical_bytes DESC
+      `);
+      const globalByType = globalByTypeStmt.all();
+
+      globalStats = {
+        total_users: Number(globalSummary.total_users || 0),
+        total_items: Number(globalSummary.total_items || 0),
+        total_versions: Number(globalSummary.total_versions || 0),
+        total_logical_bytes: Number(globalSummary.total_logical_bytes || 0),
+        deduplicated_blobs: Number(globalDedup.deduplicated_blobs || 0),
+        deduplicated_disk_bytes: Number(globalDedup.deduplicated_disk_bytes || 0),
+        locked_versions: Number(globalSummary.locked_versions || 0),
+        by_type: globalByType,
+      };
+    }
+
+    return {
+      user: userStats,
+      global: globalStats,
+      is_admin: isAdmin,
+    };
+  }
+
+  /**
+   * 孤儿快照两阶段清理与分析 (P5-6, N-8, TC10)
+   * @param {object} options
+   * @param {string} [options.ownerHandle]
+   * @param {boolean} [options.dryRun=true]
+   * @param {boolean} [options.isAdmin=false]
+   */
+  async cleanOrphanSnapshots({ ownerHandle = null, dryRun = true, isAdmin = false } = {}) {
+    // 查找候选待清理版本：必须是已软删除记录（墓碑）下的版本，且 is_locked = 0
+    let query = `
+      SELECT v.owner_handle, v.content_type, v.item_uid, v.version, v.version_title, v.size_bytes, v.blob_path, v.is_locked
+      FROM config_versions v
+      JOIN config_records r ON v.owner_handle = r.owner_handle AND v.content_type = r.content_type AND v.item_uid = r.item_uid
+      WHERE r.is_deleted = 1 AND v.is_locked = 0
+    `;
+    const params = {};
+    if (!isAdmin && ownerHandle) {
+      query += ` AND v.owner_handle = :owner`;
+      params[':owner'] = ownerHandle;
+    } else if (ownerHandle) {
+      query += ` AND v.owner_handle = :owner`;
+      params[':owner'] = ownerHandle;
+    }
+    query += ` ORDER BY v.created_at ASC`;
+
+    const candidates = this.db.prepare(query).all(params);
+
+    // 计算去重后可回收的字节数 (N-8)
+    const uniqueBlobMap = new Map();
+    for (const cand of candidates) {
+      if (cand.blob_path && !uniqueBlobMap.has(cand.blob_path)) {
+        uniqueBlobMap.set(cand.blob_path, Number(cand.size_bytes) || 0);
+      }
+    }
+    const reclaimableBytes = Array.from(uniqueBlobMap.values()).reduce((a, b) => a + b, 0);
+
+    if (dryRun) {
+      return {
+        dry_run: true,
+        candidate_count: candidates.length,
+        unique_blobs_count: uniqueBlobMap.size,
+        reclaimable_bytes: reclaimableBytes,
+        candidates: candidates.map(c => ({
+          owner_handle: c.owner_handle,
+          content_type: c.content_type,
+          item_uid: c.item_uid,
+          version: c.version,
+          version_title: c.version_title,
+          size_bytes: c.size_bytes,
+        })),
+      };
+    }
+
+    // 执行阶段 (dry_run: false)
+    let deletedCount = 0;
+    let actualFreedBytes = 0;
+
+    const stmtDeleteVersion = this.db.prepare(`
+      DELETE FROM config_versions
+      WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid AND version = :version AND is_locked = 0
+    `);
+
+    const stmtCountOtherRefs = this.db.prepare(`
+      SELECT COUNT(*) as count FROM config_versions WHERE blob_path = :blobPath AND NOT (owner_handle = :owner AND content_type = :ct AND item_uid = :uid AND version = :version)
+    `);
+
+    for (const cand of candidates) {
+      if (cand.is_locked === 1) continue;
+
+      if (cand.blob_path) {
+        const refRow = stmtCountOtherRefs.get({
+          ':blobPath': cand.blob_path,
+          ':owner': cand.owner_handle,
+          ':ct': cand.content_type,
+          ':uid': cand.item_uid,
+          ':version': cand.version,
+        });
+        if (!refRow || refRow.count === 0) {
+          try {
+            await this.store.deleteBlob(cand.blob_path);
+            actualFreedBytes += Number(cand.size_bytes) || 0;
+          } catch (e) {
+            console.warn('[cfgsync] Failed to delete orphan blob file:', cand.blob_path, e.message);
+          }
+        }
+      }
+
+      const res = stmtDeleteVersion.run({
+        ':owner': cand.owner_handle,
+        ':ct': cand.content_type,
+        ':uid': cand.item_uid,
+        ':version': cand.version,
+      });
+      if (res.changes > 0) {
+        deletedCount++;
+      }
+    }
+
+    return {
+      dry_run: false,
+      deleted_count: deletedCount,
+      freed_bytes: actualFreedBytes,
+    };
+  }
 }

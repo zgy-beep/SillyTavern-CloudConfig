@@ -139,6 +139,20 @@ export class CloudConfigApi {
     return this.request(`/versions?${params.toString()}`);
   }
 
+  async getStats() {
+    return this.request('/stats');
+  }
+
+  async cleanOrphans(dryRun = true, targetOwner = null) {
+    return this.request('/clean-orphans', {
+      method: 'POST',
+      body: JSON.stringify({
+        dry_run: dryRun,
+        target_owner: targetOwner,
+      }),
+    });
+  }
+
   async deleteVersion({ contentType, itemUid, version, owner = null }) {
     return this.request('/versions', {
       method: 'DELETE',

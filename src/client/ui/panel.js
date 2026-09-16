@@ -5,6 +5,7 @@ import { showPushDialog } from './pushDialog.js';
 import { showSettingsDialog } from './settingsDialog.js';
 import { showDeleteDialog } from './deleteDialog.js';
 import { showSnapshotHistoryDialog } from './snapshotHistoryDialog.js';
+import { showAdminDashboardDialog } from './adminDialog.js';
 
 /**
  * 渲染云同步配置主面板
@@ -66,6 +67,9 @@ export class CloudConfigPanel {
             <button id="cfgsync-settings-btn" type="button" title="云同步设置" style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; margin:0; border-radius:4px; font-size:10.5px; color:#c9d1d9; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18); cursor:pointer; user-select:none;">
               <i class="fa-solid fa-gear"></i>
             </button>
+            <button id="cfgsync-dashboard-btn" type="button" title="存储看板与清理工具" style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; margin:0; border-radius:4px; font-size:10.5px; color:#58a6ff; background:rgba(88,166,255,0.12); border:1px solid rgba(88,166,255,0.3); cursor:pointer; user-select:none;">
+              <i class="fa-solid fa-chart-pie"></i>
+            </button>
           </div>
           <span style="font-size:11.5px; opacity:0.75; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">账号: <strong class="cfgsync-account-label" style="color:#69c0ff;">${this.accountHandle}</strong></span>
         </div>
@@ -79,6 +83,23 @@ export class CloudConfigPanel {
     this.bindBackupAll();
     this.bindClaim();
     this.bindSettings();
+    this.bindDashboard();
+  }
+
+  bindDashboard() {
+    const dashBtn = this.container.querySelector('#cfgsync-dashboard-btn');
+    if (!dashBtn || dashBtn.dataset.bound) return;
+    dashBtn.dataset.bound = 'true';
+
+    dashBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showAdminDashboardDialog({
+        api: this.api,
+        isAdmin: this._isAdmin,
+        onClose: () => this.refresh(),
+      });
+    };
   }
 
   bindSettings() {
@@ -292,6 +313,7 @@ export class CloudConfigPanel {
           this.onAccountChange(this.accountHandle);
         }
       }
+      this._isAdmin = Boolean(typeRes.is_admin);
 
       // 支持所有已注册并启用的配置类型（核心类型 + P1 纯 JSON 预设）
       const allActiveTypes = typeRes.activeTypes || (typeRes.groups?.P0 || ['settings', 'openai_preset', 'world']);
