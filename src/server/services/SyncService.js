@@ -240,6 +240,16 @@ export class SyncService {
       cleanTitle = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} 备份`;
     }
 
+    if (!displayName && adapter && typeof adapter.listItems === 'function') {
+      try {
+        const localItems = await adapter.listItems(authContext.directories);
+        const matched = localItems.find(i => i.itemUid === itemUid);
+        if (matched?.displayName) {
+          displayName = matched.displayName;
+        }
+      } catch {}
+    }
+
     let serialized = null;
     let actualChecksum = checksum;
 

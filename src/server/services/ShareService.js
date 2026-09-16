@@ -36,6 +36,9 @@ export class ShareService {
     if (contentType === 'settings') {
       return Boolean(this.configService?.get('allowSettingsSharing'));
     }
+    if (contentType === 'chat') {
+      return Boolean(this.configService?.get('allowChatSharing'));
+    }
     return isShareableContentType(contentType);
   }
 

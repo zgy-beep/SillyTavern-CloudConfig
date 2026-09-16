@@ -323,6 +323,7 @@ export class CloudConfigPanel {
       const ctNameMap = {
         'settings': '通用设置',
         'character': '角色卡',
+        'chat': '会话记录',
         'theme': '主题风格',
         'openai_preset': 'OpenAI 预设',
         'textgen_preset': 'TextGen 预设',
@@ -968,6 +969,8 @@ export class CloudConfigPanel {
       `;
     } else if (contentType === 'theme') {
       iconOrAvatarHtml = `<i class="fa-solid fa-palette" style="font-size:12px; color:#d48806; flex-shrink:0;"></i>`;
+    } else if (contentType === 'chat') {
+      iconOrAvatarHtml = `<i class="fa-solid fa-comments" style="font-size:11px; color:#a371f7; flex-shrink:0;"></i>`;
     } else if (contentType === 'settings') {
       iconOrAvatarHtml = `<i class="fa-solid fa-sliders" style="font-size:11px; color:#79c0ff; flex-shrink:0;"></i>`;
     } else if (contentType === 'world') {
@@ -994,7 +997,7 @@ export class CloudConfigPanel {
         <button class="cfgsync-push-btn menu_button" title="${hasCloud ? '推送到云端 (上传新快照覆盖云端)' : '未同步：立即推送到云端生成首个快照'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; ${!row._existsLocally ? 'opacity:0.25 !important; pointer-events:none;' : (!hasCloud ? 'opacity:1 !important; background:rgba(31,111,235,0.22) !important; border:1px solid rgba(88,166,255,0.5) !important; color:#58a6ff !important;' : 'opacity:0.9;')}">
           <i class="fa-solid fa-cloud-arrow-up"></i>
         </button>
-        ${contentType !== 'settings' ? `
+        ${contentType !== 'settings' && contentType !== 'chat' ? `
         <button class="cfgsync-share-btn menu_button" title="${hasCloud ? '分享配置 (生成邀请码 / 设为公开)' : '尚未推送到云端，无法分享'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'opacity:0.9; cursor:pointer !important;'}">
           <i class="fa-solid fa-share-nodes"></i>
         </button>
