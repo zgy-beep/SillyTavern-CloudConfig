@@ -347,6 +347,19 @@ export function createPluginRouter({
     res.json({ versions: versions.map(v => ({ ...v, size_bytes: v.size_bytes || 0 })) });
   }));
 
+  // 6.5 DELETE /versions (删除指定快照版本)
+  router.delete('/versions', asyncHandler(async (req, res) => {
+    const { content_type: contentType, item_uid: itemUid, version } = req.body;
+    const owner = req.body.owner || req.authContext.handle;
+
+    if (!contentType || !itemUid || version === undefined) {
+      return res.status(400).json({ error: 'BadRequest', message: 'content_type, item_uid, and version are required' });
+    }
+
+    const success = await syncService.deleteVersion(req.authContext, owner, contentType, itemUid, Number(version));
+    res.json({ success });
+  }));
+
   // 7. POST /rollback
   router.post('/rollback', asyncHandler(async (req, res) => {
     const {

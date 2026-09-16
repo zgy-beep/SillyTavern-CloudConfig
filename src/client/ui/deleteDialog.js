@@ -23,6 +23,7 @@ export function showDeleteDialog({ displayName, contentType, itemUid, existsLoca
   `;
 
   const isSettings = contentType === 'settings';
+  const defaultLocalChecked = !isSettings && existsLocally;
 
   modal.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px;">
@@ -31,8 +32,12 @@ export function showDeleteDialog({ displayName, contentType, itemUid, existsLoca
           <i class="fa-solid fa-trash-can" style="font-size:15px;"></i>
         </div>
         <div style="min-width:0; flex:1;">
-          <div style="font-size:15px; font-weight:600; color:#f0f6fc; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">删除配置</div>
-          <div style="font-size:11.5px; color:#8b949e; line-height:1.3; margin-top:2px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${displayName}">${displayName}${!existsLocally ? ' (本地无文件 · 仅删云端)' : ''}</div>
+          <div style="font-size:15px; font-weight:600; color:#f0f6fc; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">
+            ${isSettings ? '清空云端备份' : '删除配置'}
+          </div>
+          <div style="font-size:11.5px; color:#8b949e; line-height:1.3; margin-top:2px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${displayName}">
+            ${displayName}${isSettings ? ' (通用设置 · 本地保留)' : (!existsLocally ? ' (本地无文件 · 仅删云端)' : '')}
+          </div>
         </div>
       </div>
       <button id="cfgsync-delete-close-x" type="button" style="width:26px; height:26px; border-radius:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#8b949e; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0; transition:all 0.15s ease;">&times;</button>
@@ -43,28 +48,33 @@ export function showDeleteDialog({ displayName, contentType, itemUid, existsLoca
       <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; gap:8px;">
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12.5px; color:#e6edf3; user-select:none;">
           <input id="cfgsync-delete-cloud-cb" type="checkbox" checked style="accent-color:#f85149; width:15px; height:15px; cursor:pointer;" />
-          <span style="font-weight:500;">删除云端备份</span>
-          <span style="font-size:11px; color:#8b949e;">(生成墓碑，重新上传可复活)</span>
+          <span style="font-weight:500;">${isSettings ? '清空云端所有快照与备份' : '删除云端备份'}</span>
+          <span style="font-size:11px; color:#8b949e;">(生成墓碑，重新上传可随时复活)</span>
         </label>
 
-        <label style="display:flex; align-items:center; gap:8px; ${isSettings || !existsLocally ? 'cursor:not-allowed; opacity:0.5;' : 'cursor:pointer;'} font-size:12.5px; color:#e6edf3; user-select:none;">
-          <input id="cfgsync-delete-local-cb" type="checkbox" ${isSettings || !existsLocally ? 'disabled' : ''} style="accent-color:#f85149; width:15px; height:15px; ${isSettings || !existsLocally ? 'cursor:not-allowed;' : 'cursor:pointer;'}" />
+        ${isSettings ? `
+        <div style="font-size:11px; color:#8b949e; padding:6px 8px; background:rgba(255,255,255,0.02); border-radius:4px; border-left:3px solid #58a6ff;">
+          <span style="color:#58a6ff; font-weight:500;">本地保护</span>：通用设置是酒馆核心运行文件，本地必须保留。本次操作仅清理云端，清空后恢复为未同步状态。
+        </div>
+        <input id="cfgsync-delete-local-cb" type="checkbox" style="display:none;" />
+        ` : `
+        <label style="display:flex; align-items:center; gap:8px; ${!existsLocally ? 'cursor:not-allowed; opacity:0.5;' : 'cursor:pointer;'} font-size:12.5px; color:#e6edf3; user-select:none;">
+          <input id="cfgsync-delete-local-cb" type="checkbox" ${defaultLocalChecked ? 'checked' : ''} ${!existsLocally ? 'disabled' : ''} style="accent-color:#f85149; width:15px; height:15px; ${!existsLocally ? 'cursor:not-allowed;' : 'cursor:pointer;'}" />
           <span style="font-weight:500;">同时删除本地文件</span>
-          ${isSettings ? `
-          <span style="font-size:10.5px; color:#f85149; background:rgba(248,81,73,0.15); padding:1px 5px; border-radius:3px; margin-left:4px;">禁止删除 settings 本地文件</span>
-          ` : (!existsLocally ? `
-          <span style="font-size:11px; color:#8b949e;">(本地不存在此文件)</span>
+          ${!existsLocally ? `
+          <span style="font-size:11px; color:#8b949e;">(本地磁盘无此文件)</span>
           ` : `
           <span style="font-size:11px; color:#52c41a;">(删前自动生成 .bak 备份)</span>
-          `)}
+          `}
         </label>
+        `}
       </div>
 
       <!-- 说明与警示 -->
       <div style="display:flex; flex-direction:column; gap:6px; font-size:11.5px; line-height:1.45; color:#8b949e; background:rgba(0,0,0,0.18); border-radius:6px; padding:10px 12px; border:1px dashed rgba(255,255,255,0.08);">
         <div style="display:flex; align-items:flex-start; gap:6px;">
           <i class="fa-solid fa-circle-info" style="color:#58a6ff; font-size:11px; margin-top:2px; flex-shrink:0;"></i>
-          <span><strong>云端防误删机制</strong>：删除后将在云端留下安全墓碑，防止老设备误覆盖；再次推送同名配置即可随时“复活”。</span>
+          <span><strong>云端防误删机制</strong>：删除后将在云端留下安全墓碑，防止老设备误覆盖；再次推送即可随时“复活”。</span>
         </div>
         <div style="display:flex; align-items:flex-start; gap:6px;">
           <i class="fa-solid fa-triangle-exclamation" style="color:#faad14; font-size:11px; margin-top:2px; flex-shrink:0;"></i>
@@ -78,7 +88,7 @@ export function showDeleteDialog({ displayName, contentType, itemUid, existsLoca
         ` : `
         <div style="display:flex; align-items:flex-start; gap:6px;">
           <i class="fa-solid fa-lightbulb" style="color:#52c41a; font-size:11px; margin-top:2px; flex-shrink:0;"></i>
-          <span><strong>提示</strong>：若删除了本地文件，建议刷新页面或重启酒馆以清除内存中的缓存对象。</span>
+          <span><strong>提示</strong>：若删除了本地文件，建议刷新页面以同步更新酒馆内存缓存。</span>
         </div>
         `}
       </div>
@@ -88,7 +98,7 @@ export function showDeleteDialog({ displayName, contentType, itemUid, existsLoca
       <button id="cfgsync-delete-cancel-btn" type="button" style="padding:7px 16px; border-radius:6px; font-size:12.5px; font-weight:500; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); color:#c9d1d9; cursor:pointer; transition:all 0.15s ease;">取消</button>
       <button id="cfgsync-delete-confirm-btn" type="button" style="display:inline-flex; align-items:center; gap:6px; padding:7px 20px; border-radius:6px; font-size:12.5px; font-weight:600; background:#da3633; border:1px solid rgba(255,255,255,0.12); color:#ffffff; cursor:pointer; transition:all 0.15s ease; box-shadow:0 1px 4px rgba(0,0,0,0.3);">
         <i class="fa-solid fa-trash-can"></i>
-        <span>${!existsLocally ? '确认删除云端记录' : '确认删除'}</span>
+        <span>${isSettings ? '确认清空云端备份' : (!existsLocally ? '确认删除云端记录' : '确认删除')}</span>
       </button>
     </div>
   `;

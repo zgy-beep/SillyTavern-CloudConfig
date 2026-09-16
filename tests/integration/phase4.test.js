@@ -645,4 +645,104 @@ test('Integration: Phase 4 Visuals, Pruning, Delete & Server-Side Lock Protectio
     const pullRes = await fetch(`${baseUrl}/pull?content_type=openai_preset&item_uid=${ghostUid}`);
     assert.equal(pullRes.status, 404);
   });
+
+  // TC18: DELETE /versions deletes specific historical version and manages records
+  await t.test('TC18: DELETE /versions deletes specific version and updates current_version', async () => {
+    currentUser = 'alice';
+    currentUserDir = aliceDir;
+
+    const snapUid = makeItemUid('openai_preset', 'Snapshot_Test_Preset.json');
+
+    // Push version 1
+    const p1 = await fetch(`${baseUrl}/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'openai_preset',
+        item_uid: snapUid,
+        payload: { ver: 1 },
+        version_title: 'First Snapshot',
+        force: true,
+      }),
+    });
+    assert.equal(p1.status, 200);
+
+    // Push version 2
+    const p2 = await fetch(`${baseUrl}/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'openai_preset',
+        item_uid: snapUid,
+        payload: { ver: 2 },
+        version_title: 'Second Snapshot',
+        force: true,
+      }),
+    });
+    assert.equal(p2.status, 200);
+
+    // Check GET /versions returns 2 versions
+    let vRes = await fetch(`${baseUrl}/versions?content_type=openai_preset&item_uid=${snapUid}`);
+    let vData = await vRes.json();
+    assert.equal(vData.versions.length, 2);
+
+    // Bob tries to delete Alice's version 2 -> 403 Forbidden
+    currentUser = 'bob';
+    currentUserDir = bobDir;
+    const forbidRes = await fetch(`${baseUrl}/versions`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'openai_preset',
+        item_uid: snapUid,
+        version: 2,
+        owner: 'alice',
+      }),
+    });
+    assert.equal(forbidRes.status, 403);
+
+    // Alice deletes version 2
+    currentUser = 'alice';
+    currentUserDir = aliceDir;
+    const delV2Res = await fetch(`${baseUrl}/versions`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'openai_preset',
+        item_uid: snapUid,
+        version: 2,
+      }),
+    });
+    assert.equal(delV2Res.status, 200);
+    const delV2Data = await delV2Res.json();
+    assert.equal(delV2Data.success, true);
+
+    // GET /versions now has only 1 version
+    vRes = await fetch(`${baseUrl}/versions?content_type=openai_preset&item_uid=${snapUid}`);
+    vData = await vRes.json();
+    assert.equal(vData.versions.length, 1);
+    assert.equal(vData.versions[0].version, 1);
+
+    // Pull now yields version 1
+    const pullV1 = await fetch(`${baseUrl}/pull?content_type=openai_preset&item_uid=${snapUid}`);
+    assert.equal(pullV1.status, 200);
+    const pullData = await pullV1.json();
+    assert.equal(pullData.content.ver, 1);
+
+    // Alice deletes version 1 (the last version)
+    const delV1Res = await fetch(`${baseUrl}/versions`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'openai_preset',
+        item_uid: snapUid,
+        version: 1,
+      }),
+    });
+    assert.equal(delV1Res.status, 200);
+
+    // Now pull returns 404 (item marked as deleted tombstone)
+    const pullEmpty = await fetch(`${baseUrl}/pull?content_type=openai_preset&item_uid=${snapUid}`);
+    assert.equal(pullEmpty.status, 404);
+  });
 });

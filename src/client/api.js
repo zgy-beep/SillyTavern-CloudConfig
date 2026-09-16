@@ -139,6 +139,18 @@ export class CloudConfigApi {
     return this.request(`/versions?${params.toString()}`);
   }
 
+  async deleteVersion({ contentType, itemUid, version, owner = null }) {
+    return this.request('/versions', {
+      method: 'DELETE',
+      body: JSON.stringify({
+        content_type: contentType,
+        item_uid: itemUid,
+        version,
+        owner,
+      }),
+    });
+  }
+
   async rollback({ contentType, itemUid, targetVersion, baseVersion, clientId }) {
     return this.request('/rollback', {
       method: 'POST',

@@ -4,6 +4,7 @@ import { showClaimDialog, showShareDialog } from './shareDialog.js';
 import { showPushDialog } from './pushDialog.js';
 import { showSettingsDialog } from './settingsDialog.js';
 import { showDeleteDialog } from './deleteDialog.js';
+import { showSnapshotHistoryDialog } from './snapshotHistoryDialog.js';
 
 /**
  * 渲染云同步配置主面板
@@ -449,11 +450,10 @@ export class CloudConfigPanel {
   getStateInfo(state, version, cloudItem = null, binding = null) {
     if (binding && binding.enabled && state === SyncState.SYNCED) {
       if (cloudItem && cloudItem.current_version > (binding.last_synced_version || 0)) {
-        return { color: '#faad14', label: `☁️ v${cloudItem.current_version}` };
+        return { color: '#faad14', label: '☁️ 有更新' };
       }
-      const vText = version ? `v${version}` : '已同步';
       const fromText = (binding.source_owner_handle && binding.source_owner_handle !== this.accountHandle) ? ` @${binding.source_owner_handle}` : '';
-      return { color: '#52c41a', label: `${vText}${fromText}` };
+      return { color: '#52c41a', label: `已同步${fromText}` };
     }
     if (state === SyncState.CONFLICT) {
       return { color: '#f5222d', label: '⚠️ 冲突' };
@@ -464,7 +464,7 @@ export class CloudConfigPanel {
     if (cloudItem) {
       const isCross = cloudItem.owner_handle && cloudItem.owner_handle !== this.accountHandle;
       const ownerText = isCross ? ` @${cloudItem.owner_handle}` : '';
-      return { color: '#1890ff', label: `v${cloudItem.current_version}${ownerText}` };
+      return { color: '#1890ff', label: `已备份${ownerText}` };
     }
     return { color: '#8c8c8c', label: '未同步' };
   }
@@ -494,81 +494,72 @@ export class CloudConfigPanel {
    * @returns {string} select 或 badge 的 HTML
    */
   renderVersionSelectorHtml(state, version, cloudItem = null, binding = null) {
-    const info = this.getStateInfo(state, version, cloudItem, binding);
-
     // 云端没有任何版本时，显示精致虚线小胶囊徽章
     if (!cloudItem) {
-      return `<span class="cfgsync-state-badge cfgsync-badge-unsynced" title="当前配置仅保存在本地，尚未备份到云端" style="display:inline-flex; align-items:center; justify-content:center; font-size:10.5px; height:22px; line-height:20px; box-sizing:border-box; padding:0 7px; border-radius:11px; background:transparent; border:1px dashed rgba(255,255,255,0.18); color:#8b949e; white-space:nowrap; user-select:none; letter-spacing:0.3px;"><i class="fa-solid fa-cloud-slash" style="font-size:9.5px; margin-right:3px; opacity:0.6;"></i>未同步</span>`;
+      return `<span class="cfgsync-state-badge cfgsync-badge-unsynced" title="当前配置仅保存在本地，尚未备份到云端" style="display:inline-flex; align-items:center; justify-content:center; font-size:10.5px; height:22px; line-height:20px; box-sizing:border-box; padding:0 8px; border-radius:11px; background:transparent; border:1px dashed rgba(255,255,255,0.18); color:#8b949e; white-space:nowrap; user-select:none; letter-spacing:0.3px;"><i class="fa-solid fa-cloud-slash" style="font-size:9.5px; margin-right:4px; opacity:0.6;"></i>未同步</span>`;
     }
 
-    // 有云端版本时，显示方案 A 极简胶囊下拉选择器（高对比云端蓝，带云朵图标）
-    const currentV = cloudItem.current_version || 1;
+    // 有云端版本时，显示方案 A 极简胶囊快照历史按钮（高对比云端蓝，无截断无白底白字）
     const isCross = cloudItem.owner_handle && cloudItem.owner_handle !== this.accountHandle;
-    const ownerSuffix = isCross ? ` @${cloudItem.owner_handle}` : '';
-    const initialText = `v${currentV}${ownerSuffix}`;
+    const badgeLabel = isCross ? `@${cloudItem.owner_handle} ▾` : '历史快照 ▾';
 
-    return `<select class="cfgsync-version-select cfgsync-badge-synced" title="云端已有备份 (点击展开历史版本时间线)" style="display:inline-flex; align-items:center; font-size:10.5px; font-weight:600; height:22px; line-height:20px; box-sizing:border-box; padding:0 6px; border-radius:11px; border:1px solid rgba(88,166,255,0.45); background:rgba(31,111,235,0.18); color:#58a6ff; cursor:pointer; outline:none; text-align:center; text-align-last:center; max-width:88px; transition:all 0.15s ease;">
-      <option value="${currentV}" style="background:#1c202a; color:#f0f6fc;" selected>☁️ ${initialText}</option>
-    </select>`;
+    return `<button class="cfgsync-history-badge-btn menu_button" type="button" title="点击查看与管理云端历史快照" style="display:inline-flex !important; align-items:center !important; gap:4px !important; font-size:10.5px !important; font-weight:600 !important; height:22px !important; line-height:20px !important; box-sizing:border-box !important; padding:0 8px !important; border-radius:11px !important; border:1px solid rgba(88,166,255,0.45) !important; background:rgba(31,111,235,0.18) !important; color:#58a6ff !important; cursor:pointer !important; outline:none !important; white-space:nowrap !important; transition:all 0.15s ease !important;">
+      <i class="fa-solid fa-cloud" style="font-size:10px;"></i>
+      <span>${badgeLabel}</span>
+    </button>`;
   }
 
   /**
-   * 懒加载版本历史到下拉选择器（方案 A 极简层级）
+   * 还原云端指定快照或最新快照到本地
    */
-  async loadVersionOptions(row) {
-    if (row._versionsLoaded) return;
-    const cloudItem = row._cloudItem;
-    if (!cloudItem) return;
-
-    const contentType = row.dataset.contentType;
-    const itemUid = row.dataset.itemUid;
-    const owner = cloudItem.owner_handle || this.accountHandle;
-    const isCross = owner !== this.accountHandle;
-
+  async restoreSnapshot(row, contentType, item, targetVersion = null) {
+    if (!row._binding || !row._binding.enabled) {
+      const sourceOwner = row._cloudItem?.owner_handle || this.accountHandle;
+      row._binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
+    }
+    const pullBtn = row.querySelector('.cfgsync-pull-btn');
+    const origHtml = pullBtn ? pullBtn.innerHTML : '';
+    if (pullBtn) {
+      pullBtn.disabled = true;
+      pullBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    }
     try {
-      const res = await this.api.getVersions(contentType, itemUid, owner);
-      const versions = res.versions || [];
-      if (versions.length === 0) return;
+      const res = await this.syncManager.pullCloud(row._binding, null, targetVersion);
+      row._existsLocally = true;
+      this.updateRowState(row, row._binding, row._cloudItem, true);
 
-      const select = row.querySelector('.cfgsync-version-select');
-      if (!select) return;
-
-      const currentSelected = select.value;
-
-      select.innerHTML = '';
-      for (let i = 0; i < versions.length; i++) {
-        const v = versions[i];
-        if (v.operation === 'DELETE') continue;
-        const isLatest = i === 0;
-        const timeText = v.created_at ? this.formatRelativeTime(v.created_at) : '';
-        const ownerTag = isCross ? ` · @${owner}` : '';
-        let sizeStr = '';
-        if (v.size_bytes && v.size_bytes > 0) {
-          sizeStr = v.size_bytes >= 1048576 
-            ? ` · ${(v.size_bytes / (1024 * 1024)).toFixed(1)}MB`
-            : ` · ${Math.round(v.size_bytes / 1024)}KB`;
-        }
-        const titleStr = v.version_title ? ` · ${v.version_title}` : (timeText ? ` · ${timeText}` : '');
-        const latestTag = isLatest ? ' (最新)' : '';
-
-        const label = `v${v.version}${latestTag}${titleStr}${sizeStr}${ownerTag}`;
-
-        const opt = document.createElement('option');
-        opt.value = String(v.version);
-        opt.textContent = `☁️ ${label}`;
-        opt.style.cssText = 'background: #1c202a; color: #f0f6fc;';
-        if (String(v.version) === currentSelected) opt.selected = true;
-        select.appendChild(opt);
+      if (contentType === 'settings' && typeof window !== 'undefined' && res.content) {
+        try {
+          if (window.settings && typeof window.settings === 'object') {
+            Object.assign(window.settings, res.content);
+          }
+          if (window.SillyTavern?.getContext?.()?.settings) {
+            Object.assign(window.SillyTavern.getContext().settings, res.content);
+          }
+        } catch {}
       }
 
-      // 如果之前选中的版本已不存在，默认选中最新
-      if (!select.querySelector(`option[value="${currentSelected}"]`)) {
-        select.selectedIndex = 0;
+      const versionDesc = targetVersion ? '指定快照' : '最新快照';
+      let reloadMsg = `拉取成功！已将【${item.displayName}】的 ${versionDesc} 同步并保存到当前账号（${this.accountHandle}）的本地目录中。\n\n是否立即刷新页面让酒馆完整应用新配置？`;
+      if (contentType === 'settings') {
+        reloadMsg = `拉取成功！已自动将【${item.displayName}】的 ${versionDesc} 同步并安全合并到当前账号（${this.accountHandle}）的本地配置中（已自动生成备份保护）。\n\n提示：酒馆服务在启动时会缓存全局配置与 API 密钥，若包含密钥更新，建议重启 SillyTavern 服务端以完全生效。\n\n是否立即刷新前端页面？`;
       }
-
-      row._versionsLoaded = true;
-    } catch (err) {
-      console.warn('[cfgsync] Failed to load version history:', err.message);
+      const shouldReload = confirm(reloadMsg);
+      if (shouldReload) {
+        window.location.reload();
+      }
+    } catch (e) {
+      if (e.status === 423 || e.data?.code === 'LOCKED') {
+        alert('【拉取已被防替换锁定保护拦截】\n\n当前配置已开启防替换锁定保护，阻止来自云端的覆盖！\n如需覆盖更新本地，请先点击行内的金色 🔒 图标解除锁定，然后再执行拉取。');
+      } else {
+        alert(`拉取失败: ${e.message}`);
+      }
+    } finally {
+      if (pullBtn) {
+        pullBtn.disabled = !row._cloudItem;
+        pullBtn.innerHTML = origHtml;
+        pullBtn.style.opacity = row._cloudItem ? '0.9' : '0.35';
+      }
     }
   }
 
@@ -617,18 +608,45 @@ export class CloudConfigPanel {
       rowRef.style.color = hasCloud ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)';
     }
 
-    // 2. 状态徽章与选择器 (确保每次更新都重新挂载最新云端版本，并重置懒加载监听)
+    // 2. 状态徽章与历史浮层
     const badgeContainer = row.querySelector('.cfgsync-state-badge-container');
     if (badgeContainer) {
       badgeContainer.innerHTML = this.renderVersionSelectorHtml(state, version, hasCloud ? cItem : null, binding);
       if (hasCloud) {
-        const newSelect = badgeContainer.querySelector('.cfgsync-version-select');
-        if (newSelect) {
-          row._versionsLoaded = false;
-          newSelect.addEventListener('focus', () => this.loadVersionOptions(row), { once: true });
-          newSelect.addEventListener('mousedown', () => this.loadVersionOptions(row), { once: true });
+        const historyBtn = badgeContainer.querySelector('.cfgsync-history-badge-btn');
+        if (historyBtn) {
+          historyBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const owner = cItem?.owner_handle || this.accountHandle;
+            const displayName = row._itemDisplayName || row.querySelector('.cfgsync-row-name')?.textContent || '配置项';
+            showSnapshotHistoryDialog({
+              displayName,
+              contentType: row.dataset.contentType,
+              itemUid: row.dataset.itemUid,
+              owner,
+              isCrossAccount: Boolean(owner && owner !== this.accountHandle),
+              isLocked: row._isLocked,
+              api: this.api,
+              onRestore: async (targetVer) => {
+                await this.restoreSnapshot(row, row.dataset.contentType, { displayName, itemUid: row.dataset.itemUid }, targetVer);
+              },
+              onDeleteVersion: async () => {
+                await this.refresh();
+              },
+            });
+          };
         }
       }
+    }
+
+    // 2.5 同步防替换锁定按钮状态
+    const lockBtn = row.querySelector('.cfgsync-lock-btn');
+    if (lockBtn) {
+      const isLocked = Boolean(cItem?.is_locked !== undefined ? cItem.is_locked : row._isLocked);
+      row._isLocked = isLocked;
+      const owner = cItem?.owner_handle || this.accountHandle;
+      this.updateLockBtnState(lockBtn, isLocked, owner);
     }
 
     // 3. 按钮状态与视觉区分
@@ -765,11 +783,31 @@ export class CloudConfigPanel {
       </div>
     `;
 
-    // 为版本选择器绑定懒加载事件
-    const versionSelect = row.querySelector('.cfgsync-version-select');
-    if (versionSelect) {
-      versionSelect.addEventListener('focus', () => this.loadVersionOptions(row), { once: true });
-      versionSelect.addEventListener('mousedown', () => this.loadVersionOptions(row), { once: true });
+    row._itemDisplayName = item.displayName;
+
+    // 绑定快照历史弹窗事件
+    const historyBtn = row.querySelector('.cfgsync-history-badge-btn');
+    if (historyBtn) {
+      historyBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const owner = row._cloudItem?.owner_handle || this.accountHandle;
+        showSnapshotHistoryDialog({
+          displayName: item.displayName,
+          contentType,
+          itemUid: item.itemUid,
+          owner,
+          isCrossAccount: Boolean(owner && owner !== this.accountHandle),
+          isLocked: row._isLocked,
+          api: this.api,
+          onRestore: async (targetVer) => {
+            await this.restoreSnapshot(row, contentType, item, targetVer);
+          },
+          onDeleteVersion: async () => {
+            await this.refresh();
+          },
+        });
+      };
     }
 
     // 勾选切换开关
@@ -870,9 +908,8 @@ export class CloudConfigPanel {
               });
             } else {
               row._existsLocally = true;
-              row._versionsLoaded = false;
               await this.refresh();
-              const toastMsg = `已成功推送到云端 (v${res.version}${res.versionTitle ? ' · ' + res.versionTitle : ''})`;
+              const toastMsg = `已成功推送到云端 (${res.versionTitle || '最新快照'})`;
               if (typeof toastr !== 'undefined' && toastr?.success) {
                 toastr.success(toastMsg);
               }
@@ -888,55 +925,10 @@ export class CloudConfigPanel {
       });
     };
 
-    // 手动从云端拉取（支持跨账号拉取、历史版本与 423 锁定拦截识别）
+    // 手动从云端拉取（默认拉取最新快照；历史快照可通过快照历史胶囊选择性还原）
     const pullBtn = row.querySelector('.cfgsync-pull-btn');
     pullBtn.onclick = async () => {
-      if (!row._binding || !row._binding.enabled) {
-        const sourceOwner = row._cloudItem?.owner_handle || this.accountHandle;
-        row._binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
-      }
-      pullBtn.disabled = true;
-      const origHtml = pullBtn.innerHTML;
-      pullBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-      try {
-        const versionSelect = row.querySelector('.cfgsync-version-select');
-        const selectedVersion = versionSelect ? Number(versionSelect.value) : null;
-        const versionLabel = selectedVersion ? `v${selectedVersion}` : '最新版';
-
-        const res = await this.syncManager.pullCloud(row._binding, null, selectedVersion);
-        row._existsLocally = true;
-        this.updateRowState(row, row._binding, row._cloudItem, true);
-
-        if (contentType === 'settings' && typeof window !== 'undefined' && res.content) {
-          try {
-            if (window.settings && typeof window.settings === 'object') {
-              Object.assign(window.settings, res.content);
-            }
-            if (window.SillyTavern?.getContext?.()?.settings) {
-              Object.assign(window.SillyTavern.getContext().settings, res.content);
-            }
-          } catch {}
-        }
-
-        let reloadMsg = `拉取成功！已将【${item.displayName}】的 ${versionLabel} 同步并保存到当前账号（${this.accountHandle}）的本地目录中。\n\n是否立即刷新页面让酒馆完整应用新配置？`;
-        if (contentType === 'settings') {
-          reloadMsg = `拉取成功！已自动将【${item.displayName}】的 ${versionLabel} 同步并安全合并到当前账号（${this.accountHandle}）的本地配置中（已自动生成备份保护）。\n\n提示：酒馆服务在启动时会缓存全局配置与 API 密钥，若包含密钥更新，建议重启 SillyTavern 服务端以完全生效。\n\n是否立即刷新前端页面？`;
-        }
-        const shouldReload = confirm(reloadMsg);
-        if (shouldReload) {
-          window.location.reload();
-        }
-      } catch (e) {
-        if (e.status === 423 || e.data?.code === 'LOCKED') {
-          alert('【拉取已被防替换锁定保护拦截】\n\n当前配置已开启防替换锁定保护，阻止来自云端的覆盖！\n如需覆盖更新本地，请先点击行内的金色 🔒 图标解除锁定，然后再执行拉取。');
-        } else {
-          alert(`拉取失败: ${e.message}`);
-        }
-      } finally {
-        pullBtn.disabled = !row._cloudItem;
-        pullBtn.innerHTML = origHtml;
-        pullBtn.style.opacity = row._cloudItem ? '0.9' : '0.35';
-      }
+      await this.restoreSnapshot(row, contentType, item, null);
     };
 
     // 分享配置（专属邀请码 / 全服公开）
@@ -1003,8 +995,8 @@ export class CloudConfigPanel {
     if (!btn) return;
     const ownerTip = owner && owner !== this.accountHandle ? `来自 @${owner} 的配置` : '此配置';
     btn.title = isLocked
-      ? `已锁定${ownerTip}，阻止云端拉取覆盖本地 (点击解锁)`
-      : '未锁定 (点击锁定防替换覆盖)';
+      ? `防替换保护：已锁定${ownerTip}，阻止任何云端快照覆盖本地 (点击解锁)`
+      : `防替换保护：未锁定${ownerTip} (点击开启防替换锁定)`;
     btn.style.background = isLocked ? 'rgba(250, 173, 20, 0.18)' : 'transparent';
     btn.style.borderColor = isLocked ? 'rgba(250, 173, 20, 0.45)' : 'rgba(255, 255, 255, 0.12)';
     btn.style.color = isLocked ? '#faad14' : 'rgba(255, 255, 255, 0.4)';

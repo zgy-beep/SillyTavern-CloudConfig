@@ -597,6 +597,75 @@ export class SyncService {
   }
 
   /**
+   * 手动删除指定历史版本快照
+   */
+  async deleteVersion(authContext, ownerHandle, contentType, itemUid, targetVersion) {
+    if (!this.auth.can(Permission.WRITE, authContext.handle, ownerHandle, contentType, itemUid)) {
+      throw new ForbiddenError(`User '${authContext.handle}' has no write permission to delete version`);
+    }
+
+    const row = this.db.prepare(`
+      SELECT version, blob_path FROM config_versions
+      WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid AND version = :version
+    `).get({
+      ':owner': ownerHandle,
+      ':ct': contentType,
+      ':uid': itemUid,
+      ':version': targetVersion,
+    });
+
+    if (!row) return false;
+
+    if (row.blob_path) {
+      await this.store.deleteBlob(row.blob_path).catch(() => {});
+    }
+
+    this.stmtDeleteVersionRow.run({
+      ':owner': ownerHandle,
+      ':ct': contentType,
+      ':uid': itemUid,
+      ':version': targetVersion,
+    });
+
+    // 检查是否还有剩余快照版本
+    const remaining = this.stmtGetVersionsDesc.all({
+      ':owner': ownerHandle,
+      ':ct': contentType,
+      ':uid': itemUid,
+    });
+
+    if (remaining.length > 0) {
+      const highest = remaining[0];
+      this.db.prepare(`
+        UPDATE config_records
+        SET current_version = :ver, current_checksum = :chk, updated_at = :now
+        WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid
+      `).run({
+        ':ver': highest.version,
+        ':chk': highest.checksum,
+        ':now': Date.now(),
+        ':owner': ownerHandle,
+        ':ct': contentType,
+        ':uid': itemUid,
+      });
+    } else {
+      // 最后一个快照也被删除了，标记为墓碑
+      this.db.prepare(`
+        UPDATE config_records
+        SET is_deleted = 1, updated_at = :now
+        WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid
+      `).run({
+        ':now': Date.now(),
+        ':owner': ownerHandle,
+        ':ct': contentType,
+        ':uid': itemUid,
+      });
+    }
+
+    return true;
+  }
+
+  /**
    * 检查指定四元组是否处于防替换锁定状态
    */
   isLocked(requesterHandle, ownerHandle, contentType, itemUid) {
