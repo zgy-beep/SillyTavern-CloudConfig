@@ -1,6 +1,7 @@
 import { SyncState, SyncMode } from '../../common/constants.js';
 import { showConflictDialog } from './conflictDialog.js';
 import { showClaimDialog, showShareDialog } from './shareDialog.js';
+import { showPushDialog } from './pushDialog.js';
 
 /**
  * 渲染云同步配置主面板
@@ -472,13 +473,16 @@ export class CloudConfigPanel {
         const isLatest = i === 0;
         const timeText = v.created_at ? this.formatRelativeTime(v.created_at) : '';
         const ownerTag = isCross ? ` · @${owner}` : '';
-
-        let label = '';
-        if (isLatest) {
-          label = `v${v.version} (最新)${timeText ? ` · ${timeText}` : ''}${ownerTag}`;
-        } else {
-          label = `v${v.version}${timeText ? ` · ${timeText}` : ''}${ownerTag}`;
+        let sizeStr = '';
+        if (v.size_bytes && v.size_bytes > 0) {
+          sizeStr = v.size_bytes >= 1048576 
+            ? ` · ${(v.size_bytes / (1024 * 1024)).toFixed(1)}MB`
+            : ` · ${Math.round(v.size_bytes / 1024)}KB`;
         }
+        const titleStr = v.version_title ? ` · ${v.version_title}` : (timeText ? ` · ${timeText}` : '');
+        const latestTag = isLatest ? ' (最新)' : '';
+
+        const label = `v${v.version}${latestTag}${titleStr}${sizeStr}${ownerTag}`;
 
         const opt = document.createElement('option');
         opt.value = String(v.version);
@@ -594,11 +598,9 @@ export class CloudConfigPanel {
         <button class="cfgsync-pull-btn menu_button" title="从云端拉取 (下载覆盖本地)" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; opacity:${item.cloudItem ? '0.9' : '0.35'};" ${!item.cloudItem ? 'disabled' : ''}>
           <i class="fa-solid fa-cloud-arrow-down"></i>
         </button>
-        ${contentType !== 'settings' ? `
         <button class="cfgsync-share-btn menu_button" title="分享配置 (生成邀请码 / 设为公开)" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; opacity:${item.cloudItem ? '0.9' : '0.35'};" ${!item.cloudItem ? 'disabled' : ''}>
           <i class="fa-solid fa-share-nodes"></i>
         </button>
-        ` : ''}
       </div>
     `;
 
@@ -633,50 +635,59 @@ export class CloudConfigPanel {
       }
     };
 
-    // 手动推送到云端（本地存在即可直接推送，自动激活同步标记）
+    // 手动推送到云端（支持时间快照与自定义名称，网盘式直接上传）
     const pushBtn = row.querySelector('.cfgsync-push-btn');
-    pushBtn.onclick = async () => {
-      if (!row._binding || !row._binding.enabled) {
-        const sourceOwner = row._cloudItem?.owner_handle || this.accountHandle;
-        row._binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
-      }
-      pushBtn.disabled = true;
-      const origHtml = pushBtn.innerHTML;
-      pushBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-      try {
-        let localPayload = null;
-        if (contentType === 'settings' && typeof window !== 'undefined') {
+    pushBtn.onclick = () => {
+      showPushDialog({
+        displayName: item.displayName,
+        contentType,
+        onConfirm: async (versionTitle) => {
+          if (!row._binding || !row._binding.enabled) {
+            const sourceOwner = row._cloudItem?.owner_handle || this.accountHandle;
+            row._binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
+          }
+          pushBtn.disabled = true;
+          const origHtml = pushBtn.innerHTML;
+          pushBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
           try {
-            const s = window.settings || window.SillyTavern?.getContext?.()?.settings;
-            if (s && typeof s === 'object' && Object.keys(s).length > 0) {
-              localPayload = JSON.parse(JSON.stringify(s));
+            let localPayload = null;
+            if (contentType === 'settings' && typeof window !== 'undefined') {
+              try {
+                const s = window.settings || window.SillyTavern?.getContext?.()?.settings;
+                if (s && typeof s === 'object' && Object.keys(s).length > 0) {
+                  localPayload = JSON.parse(JSON.stringify(s));
+                }
+              } catch {}
             }
-          } catch {}
-        }
 
-        const res = await this.syncManager.pushLocal(row._binding, localPayload);
-        if (res.conflict) {
-          showConflictDialog({
-            displayName: item.displayName,
-            serverVersion: res.serverVersion,
-            onResolve: async (choice) => {
-              await this.syncManager.resolveConflict(row._binding, choice, localPayload);
-              row._versionsLoaded = false; // 推送后刷新版本列表
-              this.updateRowState(row, row._binding, row._cloudItem, true);
-            },
-          });
-        } else {
-          row._existsLocally = true;
-          row._versionsLoaded = false; // 推送后刷新版本列表
-          this.updateRowState(row, row._binding, row._cloudItem, true);
-        }
-      } catch (e) {
-        alert(`推送失败: ${e.message}`);
-      } finally {
-        pushBtn.disabled = !row._existsLocally;
-        pushBtn.innerHTML = origHtml;
-        pushBtn.style.opacity = row._existsLocally ? '0.9' : '0.35';
-      }
+            const res = await this.syncManager.pushLocal(row._binding, localPayload, {
+              versionTitle,
+              force: true, // 网盘式快照直传
+            });
+            if (res.conflict) {
+              showConflictDialog({
+                displayName: item.displayName,
+                serverVersion: res.serverVersion,
+                onResolve: async (choice) => {
+                  await this.syncManager.resolveConflict(row._binding, choice, localPayload);
+                  row._versionsLoaded = false;
+                  await this.refresh();
+                },
+              });
+            } else {
+              row._existsLocally = true;
+              row._versionsLoaded = false;
+              await this.refresh();
+            }
+          } catch (e) {
+            alert(`推送失败: ${e.message}`);
+          } finally {
+            pushBtn.disabled = !row._existsLocally;
+            pushBtn.innerHTML = origHtml;
+            pushBtn.style.opacity = row._existsLocally ? '0.9' : '0.35';
+          }
+        },
+      });
     };
 
     // 手动从云端拉取（支持跨账号从任意云端备份拉取并写入本地，支持选择历史版本）
@@ -711,9 +722,11 @@ export class CloudConfigPanel {
           } catch {}
         }
 
-        const shouldReload = confirm(
-          `拉取成功！已将【${item.displayName}】的 ${versionLabel} 同步并保存到当前账号（${this.accountHandle}）的本地目录中。\n\n是否立即刷新页面让酒馆完整应用新配置？`
-        );
+        let reloadMsg = `拉取成功！已将【${item.displayName}】的 ${versionLabel} 同步并保存到当前账号（${this.accountHandle}）的本地目录中。\n\n是否立即刷新页面让酒馆完整应用新配置？`;
+        if (contentType === 'settings') {
+          reloadMsg = `拉取成功！已自动将【${item.displayName}】的 ${versionLabel} 同步并安全合并到当前账号（${this.accountHandle}）的本地配置中（已自动生成备份保护）。\n\n提示：酒馆服务在启动时会缓存全局配置与 API 密钥，若包含密钥更新，建议重启 SillyTavern 服务端以完全生效。\n\n是否立即刷新前端页面？`;
+        }
+        const shouldReload = confirm(reloadMsg);
         if (shouldReload) {
           window.location.reload();
         }

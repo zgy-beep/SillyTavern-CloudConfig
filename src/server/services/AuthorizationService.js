@@ -6,19 +6,28 @@ import { Permission, isShareableContentType } from '../../common/constants.js';
 export class AuthorizationService {
   /**
    * @param {import('../db/database.js').DatabaseClient} dbClient
+   * @param {import('../config/ConfigService.js').ConfigService} [configService]
    */
-  constructor(dbClient) {
+  constructor(dbClient, configService = null) {
     this.db = dbClient;
+    this.configService = configService;
     this.prepareStatements();
+  }
+
+  isCategoryShareable(contentType) {
+    if (contentType === 'settings') {
+      return Boolean(this.configService?.get('allowSettingsSharing'));
+    }
+    return isShareableContentType(contentType);
   }
 
   prepareStatements() {
     this.stmtCheckGrant = this.db.prepare(`
-      SELECT 1 FROM share_grants
+      SELECT id, inject_secrets FROM share_grants
       WHERE owner_handle = :owner
         AND (grantee_handle = :grantee OR (is_public = 1 AND grantee_handle IS NULL))
         AND content_type = :contentType
-        AND content_type <> 'settings'
+        AND (content_type <> 'settings' OR :allowSettingsSharing = 1)
         AND status = 'active'
         AND (expires_at IS NULL OR expires_at > :now)
         AND (
@@ -48,13 +57,13 @@ export class AuthorizationService {
       return true;
     }
 
-    // 第一版：非本人访问一律只能是 READ，且 settings 绝不允许跨账号未授权读取
+    // 第一版：非本人访问一律只能是 READ
     if (action !== Permission.READ) {
       return false;
     }
 
-    // 通用设置（settings 等敏感类别）包含 API Key 等私有敏感信息，禁止跨账号共享读取
-    if (!isShareableContentType(contentType)) {
+    // 校验类别是否开放共享
+    if (!this.isCategoryShareable(contentType)) {
       return false;
     }
 
@@ -63,20 +72,29 @@ export class AuthorizationService {
   }
 
   /**
-   * 查询是否存在有效的授权记录
+   * 获取经审批的有效授权详情
    */
-  hasApprovedGrant(ownerHandle, requesterHandle, contentType, itemUid) {
-    if (!isShareableContentType(contentType)) {
-      return false;
+  getApprovedGrant(ownerHandle, requesterHandle, contentType, itemUid) {
+    if (!this.isCategoryShareable(contentType)) {
+      return null;
     }
     const now = Date.now();
+    const allowSettingsSharing = Boolean(this.configService?.get('allowSettingsSharing')) ? 1 : 0;
     const row = this.stmtCheckGrant.get({
       ':owner': ownerHandle,
       ':grantee': requesterHandle,
       ':contentType': contentType,
       ':itemUid': itemUid || '',
+      ':allowSettingsSharing': allowSettingsSharing,
       ':now': now,
     });
-    return Boolean(row);
+    return row || null;
+  }
+
+  /**
+   * 查询是否存在有效的授权记录
+   */
+  hasApprovedGrant(ownerHandle, requesterHandle, contentType, itemUid) {
+    return Boolean(this.getApprovedGrant(ownerHandle, requesterHandle, contentType, itemUid));
   }
 }

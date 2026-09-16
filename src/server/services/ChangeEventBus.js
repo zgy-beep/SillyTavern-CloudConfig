@@ -5,9 +5,11 @@
 export class ChangeEventBus {
   /**
    * @param {import('../db/database.js').DatabaseClient} dbClient
+   * @param {import('../config/ConfigService.js').ConfigService} [configService]
    */
-  constructor(dbClient) {
+  constructor(dbClient, configService = null) {
     this.db = dbClient;
+    this.configService = configService;
     this.prepareStatements();
   }
 
@@ -20,13 +22,13 @@ export class ChangeEventBus {
         AND (
           e.owner_handle = :requester
           OR (
-            e.content_type <> 'settings'
+            (e.content_type <> 'settings' OR :allowSettingsSharing = 1)
             AND EXISTS (
               SELECT 1 FROM share_grants g
               WHERE g.owner_handle = e.owner_handle
                 AND (g.grantee_handle = :requester OR (g.is_public = 1 AND g.grantee_handle IS NULL))
                 AND g.content_type = e.content_type
-                AND g.content_type <> 'settings'
+                AND (g.content_type <> 'settings' OR :allowSettingsSharing = 1)
                 AND g.status = 'active'
                 AND (g.expires_at IS NULL OR g.expires_at > :now)
                 AND (g.scope_type = 'CONTENT_TYPE' OR (g.scope_type = 'ITEM' AND g.item_uid = e.item_uid))
@@ -71,9 +73,11 @@ export class ChangeEventBus {
    */
   getChanges(requesterHandle, sinceSeq = 0, limit = 100) {
     const now = Date.now();
+    const allowSettingsSharing = Boolean(this.configService?.get('allowSettingsSharing')) ? 1 : 0;
     const rawEvents = this.stmtGetEventsSince.all({
       ':since': Number(sinceSeq) || 0,
       ':requester': requesterHandle,
+      ':allowSettingsSharing': allowSettingsSharing,
       ':now': now,
     });
 

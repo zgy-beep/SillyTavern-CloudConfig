@@ -91,7 +91,7 @@ export class CloudConfigApi {
     return this.request(`/pull?${params.toString()}`);
   }
 
-  async push({ contentType, itemUid, displayName, baseVersion, operation, checksum, payload, clientId }) {
+  async push({ contentType, itemUid, displayName, baseVersion, operation, checksum, payload, clientId, versionTitle, force }) {
     return this.request('/push', {
       method: 'POST',
       body: JSON.stringify({
@@ -103,7 +103,20 @@ export class CloudConfigApi {
         checksum,
         payload,
         client_id: clientId,
+        version_title: versionTitle,
+        force,
       }),
+    });
+  }
+
+  async getConfig() {
+    return this.request('/config');
+  }
+
+  async updateConfig(config) {
+    return this.request('/config', {
+      method: 'POST',
+      body: JSON.stringify(config),
     });
   }
 
@@ -139,7 +152,7 @@ export class CloudConfigApi {
 
   // --- Phase 2: 分享与认领 API ---
 
-  async createShareCode({ contentType, itemUid, scopeType = 'ITEM', codeUsage = 'single_use', maxUses = 1, expiresInMs }) {
+  async createShareCode({ contentType, itemUid, scopeType = 'ITEM', codeUsage = 'single_use', maxUses = 1, expiresInMs, injectSecrets = false }) {
     return this.request('/shares/create-code', {
       method: 'POST',
       body: JSON.stringify({
@@ -149,6 +162,7 @@ export class CloudConfigApi {
         code_usage: codeUsage,
         max_uses: maxUses,
         expires_in_ms: expiresInMs,
+        inject_secrets: injectSecrets,
       }),
     });
   }
@@ -163,7 +177,7 @@ export class CloudConfigApi {
     });
   }
 
-  async quickPublic({ contentType, itemUid, scopeType = 'ITEM', enabled = true }) {
+  async quickPublic({ contentType, itemUid, scopeType = 'ITEM', enabled = true, injectSecrets = false }) {
     return this.request('/shares/quick-public', {
       method: 'POST',
       body: JSON.stringify({
@@ -171,6 +185,7 @@ export class CloudConfigApi {
         item_uid: itemUid,
         scope_type: scopeType,
         enabled,
+        inject_secrets: injectSecrets,
       }),
     });
   }

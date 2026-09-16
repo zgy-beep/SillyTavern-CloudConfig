@@ -22,10 +22,11 @@ export function createPluginRouter({
   adapters,
   shareService,
   auditService,
+  configService,
 }) {
   const router = Router();
   const audit = auditService || (syncService?.db ? new AuditService(syncService.db) : null);
-  const shares = shareService || (syncService?.db && audit ? new ShareService(syncService.db, audit) : null);
+  const shares = shareService || (syncService?.db && audit ? new ShareService(syncService.db, audit, configService) : null);
 
   // 统一错误包装辅助函数
   const asyncHandler = (fn) => (req, res, next) => {
@@ -63,6 +64,7 @@ export function createPluginRouter({
   router.get('/owners', asyncHandler(async (req, res) => {
     const requester = req.authContext.handle;
     const contentType = req.query.content_type;
+    const allowSettingsSharing = Boolean(configService?.get('allowSettingsSharing')) ? 1 : 0;
 
     let stmt;
     let params;
@@ -75,12 +77,12 @@ export function createPluginRouter({
         SELECT DISTINCT owner_handle FROM share_grants
         WHERE (grantee_handle = :requester OR (is_public = 1 AND grantee_handle IS NULL))
           AND content_type = :ct
-          AND content_type <> 'settings'
+          AND (content_type <> 'settings' OR :allowSettingsSharing = 1)
           AND status = 'active'
           AND (expires_at IS NULL OR expires_at > :now)
         ORDER BY owner_handle ASC
       `);
-      params = { ':requester': requester, ':ct': contentType, ':now': Date.now() };
+      params = { ':requester': requester, ':ct': contentType, ':allowSettingsSharing': allowSettingsSharing, ':now': Date.now() };
     } else {
       stmt = syncService.db.prepare(`
         SELECT DISTINCT owner_handle FROM config_records 
@@ -88,12 +90,12 @@ export function createPluginRouter({
         UNION
         SELECT DISTINCT owner_handle FROM share_grants
         WHERE (grantee_handle = :requester OR (is_public = 1 AND grantee_handle IS NULL))
-          AND content_type <> 'settings'
+          AND (content_type <> 'settings' OR :allowSettingsSharing = 1)
           AND status = 'active'
           AND (expires_at IS NULL OR expires_at > :now)
         ORDER BY owner_handle ASC
       `);
-      params = { ':requester': requester, ':now': Date.now() };
+      params = { ':requester': requester, ':allowSettingsSharing': allowSettingsSharing, ':now': Date.now() };
     }
 
     const rows = stmt.all(params);
@@ -128,6 +130,7 @@ export function createPluginRouter({
 
     // 查询云端记录
     let records = [];
+    const allowSettingsSharing = Boolean(configService?.get('allowSettingsSharing')) ? 1 : 0;
     if (isAllOwners) {
       // 仅查询当前用户自身的数据，以及授权给当前用户的云端数据，绝不泄露全站未授权用户数据
       // 敏感类别（如 settings）绝对禁止跨账号共享，即使存在授权记录也不在列表中展示
@@ -138,13 +141,13 @@ export function createPluginRouter({
           AND (
             c.owner_handle = :requester
             OR (
-              :ct <> 'settings'
+              (:ct <> 'settings' OR :allowSettingsSharing = 1)
               AND EXISTS (
                 SELECT 1 FROM share_grants g
                 WHERE g.owner_handle = c.owner_handle
                   AND (g.grantee_handle = :requester OR (g.is_public = 1 AND g.grantee_handle IS NULL))
                   AND g.content_type = :ct
-                  AND g.content_type <> 'settings'
+                  AND (g.content_type <> 'settings' OR :allowSettingsSharing = 1)
                   AND g.status = 'active'
                   AND (g.expires_at IS NULL OR g.expires_at > :now)
                   AND (g.scope_type = 'CONTENT_TYPE' OR (g.scope_type = 'ITEM' AND g.item_uid = c.item_uid))
@@ -156,21 +159,22 @@ export function createPluginRouter({
       records = stmt.all({
         ':ct': contentType,
         ':requester': req.authContext.handle,
+        ':allowSettingsSharing': allowSettingsSharing,
         ':now': Date.now(),
       });
     } else {
       if (!authService.can(Permission.READ, req.authContext.handle, owner, contentType)) {
-        return res.status(403).json({ error: 'Forbidden', message: 'No read permission on requested target' });
+        return res.status(403).json({ error: 'ForbiddenError', message: 'No read permission on requested target' });
       }
       const stmt = syncService.db.prepare(`
-        SELECT owner_handle, item_uid, display_name, current_version, current_checksum, updated_at
-        FROM config_records
-        WHERE owner_handle = :owner AND content_type = :ct AND is_deleted = 0
-        ORDER BY updated_at DESC
+        SELECT DISTINCT c.owner_handle, c.item_uid, c.display_name, c.current_version, c.current_checksum, c.updated_at
+        FROM config_records c
+        WHERE c.content_type = :ct AND c.owner_handle = :owner AND c.is_deleted = 0
+        ORDER BY c.updated_at DESC
       `);
       records = stmt.all({
-        ':owner': owner,
         ':ct': contentType,
+        ':owner': owner,
       });
     }
 
@@ -198,11 +202,33 @@ export function createPluginRouter({
       return res.status(400).json({ error: 'BadRequest', message: 'content_type and item_uid are required' });
     }
 
+    // 鉴权与服务端授权推导（绝不依赖任何前端入参伪造）
+    const isSelf = req.authContext.handle === owner;
+    let validatedGrant = null;
+    if (!isSelf) {
+      validatedGrant = authService.getApprovedGrant(owner, req.authContext.handle, contentType, itemUid);
+      if (!validatedGrant) {
+        return res.status(403).json({ error: 'ForbiddenError', message: 'No read permission on requested target' });
+      }
+    }
+
     const result = await syncService.pull(req.authContext, owner, contentType, itemUid, targetVersion);
     if (shouldApply === 'true' || shouldApply === true) {
       const adapter = adapters.get(contentType);
       if (adapter) {
-        await adapter.apply(req.authContext.directories, itemUid, 'UPSERT', result.content, result.display_name);
+        const injectSecrets = Boolean(validatedGrant?.inject_secrets);
+        await adapter.apply(
+          req.authContext.directories,
+          itemUid,
+          'UPSERT',
+          result.content,
+          result.display_name,
+          {
+            sourceOwner: owner, // 经服务端鉴权验证后的唯一合法所有者
+            injectSecrets,
+            audit,
+          }
+        );
       }
     }
 
@@ -225,17 +251,19 @@ export function createPluginRouter({
       content_type: contentType,
       item_uid: itemUid,
       display_name: displayName,
+      version_title: versionTitle,
       base_version: baseVersion,
+      force,
       operation = 'UPSERT',
       checksum = null,
       payload = null,
       client_id: clientId = 'unknown',
     } = req.body;
 
-    if (!contentType || !itemUid || baseVersion === undefined) {
+    if (!contentType || !itemUid || (baseVersion === undefined && !force)) {
       return res.status(400).json({
         error: 'BadRequest',
-        message: 'content_type, item_uid, and base_version are required',
+        message: 'content_type and item_uid are required',
       });
     }
 
@@ -245,7 +273,9 @@ export function createPluginRouter({
       contentType,
       itemUid,
       displayName,
-      baseVersion: Number(baseVersion),
+      versionTitle,
+      baseVersion: baseVersion !== undefined ? Number(baseVersion) : 0,
+      force: force === true || force === 'true',
       operation,
       checksum,
       payload,
@@ -260,7 +290,7 @@ export function createPluginRouter({
       itemUid,
       result: 'success',
       clientId,
-      details: { version: result.version, operation },
+      details: { version: result.version, operation, version_title: result.version_title },
     });
 
     res.json({
@@ -272,9 +302,7 @@ export function createPluginRouter({
   // 5. GET /changes?since=
   router.get('/changes', asyncHandler(async (req, res) => {
     const since = Number(req.query.since) || 0;
-    const limit = Number(req.query.limit) || 100;
-
-    const result = changeBus.getChanges(req.authContext.handle, since, limit);
+    const result = changeBus.getChanges(req.authContext.handle, since);
     res.json(result);
   }));
 
@@ -288,7 +316,7 @@ export function createPluginRouter({
     }
 
     const versions = await syncService.getVersions(req.authContext, owner, contentType, itemUid);
-    res.json({ versions });
+    res.json({ versions: versions.map(v => ({ ...v, size_bytes: v.size_bytes || 0 })) });
   }));
 
   // 7. POST /rollback
@@ -326,7 +354,7 @@ export function createPluginRouter({
       itemUid,
       result: 'success',
       clientId,
-      details: { targetVersion, baseVersion },
+      details: { targetVersion, newVersion: result.version },
     });
 
     res.json({
@@ -346,6 +374,7 @@ export function createPluginRouter({
       scope_type: scopeType = 'ITEM',
       code_usage: codeUsage = 'single_use',
       max_uses: maxUses = 1,
+      inject_secrets: injectSecrets = false,
       expires_in_ms: expiresInMs,
     } = req.body;
 
@@ -355,6 +384,7 @@ export function createPluginRouter({
       scopeType,
       codeUsage,
       maxUses,
+      injectSecrets: injectSecrets === true || injectSecrets === 'true',
       expiresInMs,
     });
     res.json(result);
@@ -386,6 +416,7 @@ export function createPluginRouter({
       item_uid: itemUid,
       scope_type: scopeType = 'ITEM',
       enabled = true,
+      inject_secrets: injectSecrets = false,
     } = req.body;
 
     const result = shares.setPublicShare(req.authContext, {
@@ -393,9 +424,20 @@ export function createPluginRouter({
       itemUid,
       scopeType,
       enabled: enabled === true || enabled === 'true',
+      injectSecrets: injectSecrets === true || injectSecrets === 'true',
     });
     res.json(result);
   }));
+
+  // 10.5 GET /config & POST /config
+  router.get('/config', (req, res) => {
+    res.json({ config: configService?.getAll() || {} });
+  });
+
+  router.post('/config', (req, res) => {
+    const updated = configService?.update(req.body) || {};
+    res.json({ success: true, config: updated });
+  });
 
   // 11. POST /shares/revoke
   router.post('/shares/revoke', asyncHandler(async (req, res) => {

@@ -1,8 +1,162 @@
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import { JsonConfigAdapter } from './JsonConfigAdapter.js';
 import { makeItemUid } from '../../common/utils.js';
 import { ReloadStrategy } from '../../common/constants.js';
+
+/**
+ * 递归深度合并两个设置对象：
+ * 1. 云端有的键覆盖本地对应键
+ * 2. 成员本地独有的键（如 api_server, preset_settings）予以保留
+ * 3. 快照排除的键（如成员本地已有 tavern_helper）予以保留
+ * 4. 数组字段按 id / identifier 逐条合并，云端顺序优先，本地独有项追加在后
+ */
+export function deepMergeSettings(local, incoming) {
+  if (local === null || typeof local !== 'object' || Array.isArray(local)) {
+    return incoming;
+  }
+  if (incoming === null || typeof incoming !== 'object' || Array.isArray(incoming)) {
+    return incoming;
+  }
+
+  const result = { ...local };
+  for (const [key, incomingVal] of Object.entries(incoming)) {
+    if (!(key in local)) {
+      result[key] = incomingVal;
+    } else {
+      const localVal = local[key];
+      if (Array.isArray(incomingVal) && Array.isArray(localVal)) {
+        result[key] = mergeArrays(localVal, incomingVal);
+      } else if (
+        localVal && typeof localVal === 'object' && !Array.isArray(localVal) &&
+        incomingVal && typeof incomingVal === 'object' && !Array.isArray(incomingVal)
+      ) {
+        result[key] = deepMergeSettings(localVal, incomingVal);
+      } else {
+        result[key] = incomingVal;
+      }
+    }
+  }
+  return result;
+}
+
+function mergeArrays(localArr, incomingArr) {
+  if (incomingArr.length === 0) return [...localArr];
+  const firstIncoming = incomingArr[0];
+  // 对象数组（带有 id, name 或 identifier）
+  if (firstIncoming && typeof firstIncoming === 'object') {
+    const idKey = ['id', 'name', 'identifier', 'key'].find(k => k in firstIncoming);
+    if (idKey) {
+      const incomingIds = new Set(incomingArr.map(item => item[idKey]));
+      const localExtra = localArr.filter(item => item && typeof item === 'object' && !incomingIds.has(item[idKey]));
+      return [...incomingArr, ...localExtra];
+    }
+  }
+  // 基础值有序数组（如 prompt_order）
+  if (typeof firstIncoming === 'string' || typeof firstIncoming === 'number') {
+    const incomingSet = new Set(incomingArr);
+    const localExtra = localArr.filter(x => !incomingSet.has(x));
+    return [...incomingArr, ...localExtra];
+  }
+  return [...incomingArr];
+}
+
+/**
+ * 自动备份本地文件：settings.json.bak-<timestamp>（绝不以 .json 结尾，防扫描器误扫）
+ */
+export async function autoBackupLocalFile(filePath) {
+  try {
+    const exists = await fs.access(filePath).then(() => true).catch(() => false);
+    if (!exists) return;
+    const dir = path.dirname(filePath);
+    const baseName = path.basename(filePath);
+    const timestamp = Date.now();
+    const backupName = `${baseName}.bak-${timestamp}`;
+    const backupPath = path.join(dir, backupName);
+    await fs.copyFile(filePath, backupPath);
+
+    // 最多保留最近 3 份备份
+    const files = await fs.readdir(dir);
+    const prefix = `${baseName}.bak-`;
+    const backups = files.filter(f => f.startsWith(prefix)).sort();
+    if (backups.length > 3) {
+      for (const oldBackup of backups.slice(0, backups.length - 3)) {
+        await fs.unlink(path.join(dir, oldBackup)).catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.warn('[cfgsync] autoBackupLocalFile warning:', err.message);
+  }
+}
+
+/**
+ * 方案 B 密钥注入：从服务端 sourceOwner 的 secrets.json 中读取并安全注水到目标用户
+ */
+export async function injectSecrets(sourceOwnerHandle, targetDirectories, audit = null) {
+  try {
+    const parentDir = targetDirectories?.user ? path.dirname(targetDirectories.user) : null;
+    const rootDir = targetDirectories?.root || process.cwd();
+    const sourceSecretsCandidates = [
+      parentDir ? path.join(parentDir, sourceOwnerHandle, 'secrets.json') : null,
+      parentDir ? path.join(parentDir, `user_${sourceOwnerHandle}`, 'secrets.json') : null,
+      path.join(rootDir, 'data', sourceOwnerHandle, 'secrets.json'),
+      path.join(rootDir, 'data', `user_${sourceOwnerHandle}`, 'secrets.json'),
+      path.join(process.cwd(), 'data', sourceOwnerHandle, 'secrets.json'),
+      path.join(process.cwd(), 'secrets.json'),
+    ].filter(Boolean);
+    let sourceSecrets = null;
+    for (const p of sourceSecretsCandidates) {
+      try {
+        const text = await fs.readFile(p, 'utf8');
+        sourceSecrets = JSON.parse(text);
+        if (sourceSecrets) break;
+      } catch {}
+    }
+    if (!sourceSecrets) return;
+
+    const targetUserHandle = targetDirectories?.handle || 'default-user';
+    const targetDir = targetDirectories?.user || path.join(process.cwd(), 'data', targetUserHandle);
+    await fs.mkdir(targetDir, { recursive: true });
+    const targetSecretsPath = path.join(targetDir, 'secrets.json');
+
+    let targetSecrets = {};
+    try {
+      const text = await fs.readFile(targetSecretsPath, 'utf8');
+      targetSecrets = JSON.parse(text);
+    } catch {}
+
+    const merged = { ...sourceSecrets, ...targetSecrets };
+
+    // 对 api_key_custom 等数组按 id 逐条合并，注入共享密钥并保留成员自有独有条目
+    for (const key of Object.keys(sourceSecrets)) {
+      if (Array.isArray(sourceSecrets[key])) {
+        const srcArr = sourceSecrets[key];
+        const tgtArr = Array.isArray(targetSecrets[key]) ? targetSecrets[key] : [];
+        const srcIds = new Set(srcArr.map(item => item?.id || item?.name || JSON.stringify(item)));
+        const tgtExtra = tgtArr.filter(item => !srcIds.has(item?.id || item?.name || JSON.stringify(item)));
+        merged[key] = [...srcArr, ...tgtExtra];
+      }
+    }
+
+    const tmpPath = `${targetSecretsPath}.${Date.now()}.tmp`;
+    await fs.writeFile(tmpPath, JSON.stringify(merged, null, 2), 'utf8');
+    await fs.rename(tmpPath, targetSecretsPath);
+
+    if (audit) {
+      audit.log({
+        actor: targetUserHandle,
+        action: 'inject_secrets',
+        target: sourceOwnerHandle,
+        contentType: 'settings',
+        result: 'success',
+        details: { sensitive: true },
+      });
+    }
+  } catch (err) {
+    console.warn('[cfgsync] Failed to inject secrets:', err.message);
+  }
+}
 
 /**
  * Settings 适配器（单文件）
@@ -16,11 +170,17 @@ export class SettingsAdapter extends JsonConfigAdapter {
    * 获取当前请求用户自身专有的 settings.json 主路径（写入时严格使用此路径）
    */
   getUserPrimaryPath(directories) {
-    if (directories?.root) {
+    if (directories?.user && fsSync.existsSync(path.join(directories.user, 'settings.json'))) {
+      return path.join(directories.user, 'settings.json');
+    }
+    if (directories?.root && fsSync.existsSync(path.join(directories.root, 'settings.json'))) {
       return path.join(directories.root, 'settings.json');
     }
     if (directories?.user) {
       return path.join(directories.user, 'settings.json');
+    }
+    if (directories?.root) {
+      return path.join(directories.root, 'settings.json');
     }
     const userHandle = directories?.handle || 'default-user';
     return path.join(process.cwd(), 'data', userHandle, 'settings.json');
@@ -64,20 +224,51 @@ export class SettingsAdapter extends JsonConfigAdapter {
     }];
   }
 
-  async read(directories, itemUid) {
+  async read(directories, itemUid, options = {}) {
     const filePath = await this.getFilePath(directories);
     const content = await this.safeReadJson(filePath);
     if (!content) {
       throw new Error(`Settings file not found at ${filePath}`);
     }
+    // 默认精简排除酒馆助手庞大变量与脚本库 (~4.7MB)
+    const excludeHeavy = options.excludeHeavy !== undefined ? options.excludeHeavy : true;
+    if (excludeHeavy && content?.oai_settings?.extensions?.tavern_helper) {
+      const cloned = JSON.parse(JSON.stringify(content));
+      delete cloned.oai_settings.extensions.tavern_helper;
+      return cloned;
+    }
     return content;
   }
 
-  async apply(directories, itemUid, operation, content) {
+  async apply(directories, itemUid, operation, content, displayName = null, context = null) {
     // 写入时严格锁定为当前用户专有的 settings 路径，杜绝误写到其它用户目录
     const filePath = this.getUserPrimaryPath(directories);
     if (operation === 'UPSERT') {
-      await this.safeWriteJson(filePath, content);
+      let finalContent = content;
+      let fileExists = false;
+      try {
+        await fs.access(filePath);
+        fileExists = true;
+      } catch {}
+
+      if (fileExists) {
+        let localContent = null;
+        try {
+          const raw = await fs.readFile(filePath, 'utf8');
+          localContent = JSON.parse(raw);
+        } catch (parseErr) {
+          throw new Error(`Local settings.json is corrupted and cannot be parsed: ${parseErr.message}. Aborting apply to protect local file.`);
+        }
+        await autoBackupLocalFile(filePath);
+        finalContent = deepMergeSettings(localContent, content);
+      }
+
+      await this.safeWriteJson(filePath, finalContent);
+
+      // 方案 B：受控密钥注入（仅限鉴权推导合法且带有 inject_secrets 授权）
+      if (context?.injectSecrets && context?.sourceOwner && context?.sourceOwner !== directories?.handle) {
+        await injectSecrets(context.sourceOwner, directories, context.audit);
+      }
     } else if (operation === 'DELETE') {
       await this.safeDeleteFile(filePath);
     }

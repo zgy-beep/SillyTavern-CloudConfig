@@ -9,13 +9,19 @@ export class ShareService {
   /**
    * @param {import('../db/database.js').DatabaseClient} dbClient
    * @param {import('./AuditService.js').AuditService} auditService
+   * @param {import('../config/ConfigService.js').ConfigService|object} [configService]
    * @param {object} [options]
    * @param {string} [options.secretPath]
    * @param {string} [options.serverSecret]
    */
-  constructor(dbClient, auditService, options = {}) {
+  constructor(dbClient, auditService, configService = null, options = {}) {
+    if (configService && !configService.get && typeof configService === 'object' && !options.serverSecret) {
+      options = configService;
+      configService = null;
+    }
     this.db = dbClient;
     this.audit = auditService;
+    this.configService = configService;
     this.serverSecret = options.serverSecret || this.loadOrGenerateSecret(options.secretPath);
 
     // 内存失败限速器
@@ -24,6 +30,13 @@ export class ShareService {
     this.failedAttemptsByIp = new Map();
 
     this.prepareStatements();
+  }
+
+  isCategoryShareable(contentType) {
+    if (contentType === 'settings') {
+      return Boolean(this.configService?.get('allowSettingsSharing'));
+    }
+    return isShareableContentType(contentType);
   }
 
   /**
@@ -69,11 +82,11 @@ export class ShareService {
       INSERT INTO share_grants (
         owner_handle, grantee_handle, scope_type, content_type, item_uid,
         permission, grant_method, share_code_hash, code_usage, code_used,
-        max_uses, is_public, status, expires_at, created_at
+        max_uses, is_public, inject_secrets, status, expires_at, created_at
       ) VALUES (
         :owner, :grantee, :scopeType, :contentType, :itemUid,
         :permission, :grantMethod, :hash, :codeUsage, :codeUsed,
-        :maxUses, :isPublic, :status, :expiresAt, :now
+        :maxUses, :isPublic, :injectSecrets, :status, :expiresAt, :now
       )
     `);
 
@@ -131,7 +144,7 @@ export class ShareService {
 
     this.stmtUpdateGrantStatus = this.db.prepare(`
       UPDATE share_grants
-      SET status = :status
+      SET status = :status, inject_secrets = :injectSecrets
       WHERE id = :id
     `);
 
@@ -160,7 +173,7 @@ export class ShareService {
     this.stmtOutgoingShares = this.db.prepare(`
       SELECT id, owner_handle, grantee_handle, scope_type, content_type, item_uid,
              permission, grant_method, code_usage, code_used, max_uses, is_public,
-             status, expires_at, created_at
+             inject_secrets, status, expires_at, created_at
       FROM share_grants
       WHERE owner_handle = :owner AND status <> 'revoked'
       ORDER BY created_at DESC
@@ -168,7 +181,7 @@ export class ShareService {
 
     this.stmtIncomingShares = this.db.prepare(`
       SELECT id, owner_handle, scope_type, content_type, item_uid,
-             permission, grant_method, expires_at, created_at
+             permission, grant_method, inject_secrets, expires_at, created_at
       FROM share_grants
       WHERE grantee_handle = :requester AND status = 'active'
         AND (expires_at IS NULL OR expires_at > :now)
@@ -318,7 +331,7 @@ export class ShareService {
       throw err;
     }
 
-    if (!isShareableContentType(contentType)) {
+    if (!this.isCategoryShareable(contentType)) {
       const err = new Error(`Category '${contentType}' is not shareable`);
       err.status = 400;
       throw err;
@@ -368,6 +381,7 @@ export class ShareService {
       ':codeUsed': 0,
       ':maxUses': effectiveMaxUses,
       ':isPublic': 0,
+      ':injectSecrets': options.injectSecrets ? 1 : 0,
       ':status': initialStatus,
       ':expiresAt': expiresAt,
       ':now': now,
@@ -380,7 +394,13 @@ export class ShareService {
       contentType,
       itemUid,
       result: 'success',
-      details: { grant_id: info.lastInsertRowid, code_usage: codeUsage, max_uses: effectiveMaxUses },
+      details: {
+        grant_id: info.lastInsertRowid,
+        code_usage: codeUsage,
+        max_uses: effectiveMaxUses,
+        inject_secrets: Boolean(options.injectSecrets),
+        sensitive: contentType === 'settings',
+      },
     });
 
     return {
@@ -412,6 +432,7 @@ export class ShareService {
       itemUid,
       scopeType = 'ITEM',
       enabled = true,
+      injectSecrets = false,
     } = options;
 
     if (!contentType) {
@@ -420,8 +441,8 @@ export class ShareService {
       throw err;
     }
 
-    // 细则 2：公开分享也必须校验类别白名单
-    if (!isShareableContentType(contentType)) {
+    // 校验类别是否允许共享
+    if (!this.isCategoryShareable(contentType)) {
       const err = new Error(`Category '${contentType}' is not shareable`);
       err.status = 400;
       throw err;
@@ -456,7 +477,11 @@ export class ShareService {
       });
 
       if (existing) {
-        this.stmtUpdateGrantStatus.run({ ':status': 'active', ':id': existing.id });
+        this.stmtUpdateGrantStatus.run({
+          ':status': 'active',
+          ':injectSecrets': injectSecrets ? 1 : 0,
+          ':id': existing.id,
+        });
       } else {
         this.stmtInsertGrant.run({
           ':owner': owner,
@@ -471,6 +496,7 @@ export class ShareService {
           ':codeUsed': 0,
           ':maxUses': 0,
           ':isPublic': 1,
+          ':injectSecrets': injectSecrets ? 1 : 0,
           ':status': 'active',
           ':expiresAt': null,
           ':now': now,
@@ -484,7 +510,12 @@ export class ShareService {
         contentType,
         itemUid,
         result: 'success',
-        details: { type: 'public_share', enabled: true },
+        details: {
+          type: 'public_share',
+          enabled: true,
+          inject_secrets: Boolean(injectSecrets),
+          sensitive: contentType === 'settings',
+        },
       });
 
       return { success: true, is_public: true };
@@ -681,6 +712,7 @@ export class ShareService {
           ':codeUsed': 1,
           ':maxUses': 1,
           ':isPublic': 0,
+          ':injectSecrets': grantRow.inject_secrets || 0,
           ':status': 'active',
           ':expiresAt': grantRow.expires_at,
           ':now': now,

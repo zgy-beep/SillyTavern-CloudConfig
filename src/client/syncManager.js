@@ -79,9 +79,9 @@ export class ClientSyncManager {
   }
 
   /**
-   * 将本地配置推送到云端（带 CAS 校验）
+   * 将本地配置推送到云端（支持时间快照与网盘式直传）
    */
-  async pushLocal(binding, localPayload) {
+  async pushLocal(binding, localPayload, options = {}) {
     try {
       const res = await this.api.push({
         contentType: binding.content_type,
@@ -91,6 +91,8 @@ export class ClientSyncManager {
         operation: 'UPSERT',
         payload: localPayload,
         clientId: this.clientId,
+        versionTitle: options.versionTitle,
+        force: options.force !== undefined ? options.force : true,
       });
 
       binding.last_synced_version = res.version;
@@ -99,7 +101,7 @@ export class ClientSyncManager {
       binding.state = SyncState.SYNCED;
       await this.storage.saveBinding(binding);
 
-      return { success: true, version: res.version };
+      return { success: true, version: res.version, versionTitle: res.version_title };
     } catch (err) {
       if (err.status === 409) {
         binding.state = SyncState.CONFLICT;

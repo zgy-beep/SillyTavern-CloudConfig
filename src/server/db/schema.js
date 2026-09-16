@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS config_versions (
   mime_type TEXT,
   ext TEXT,
   blob_path TEXT,
+  version_title TEXT,
+  size_bytes INTEGER DEFAULT 0,
   created_at INTEGER NOT NULL,
   created_by_client TEXT,
   PRIMARY KEY (owner_handle, content_type, item_uid, version)
@@ -57,6 +59,7 @@ CREATE TABLE IF NOT EXISTS share_grants (
   code_used INTEGER NOT NULL DEFAULT 0,
   max_uses INTEGER NOT NULL DEFAULT 0,
   is_public INTEGER NOT NULL DEFAULT 0,
+  inject_secrets INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',
   expires_at INTEGER,
   created_at INTEGER NOT NULL

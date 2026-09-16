@@ -170,6 +170,21 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
       <button id="cfgsync-share-close-x" type="button" style="width:26px; height:26px; border-radius:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#8b949e; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0; transition:all 0.15s ease;">&times;</button>
     </div>
 
+    ${contentType === 'settings' ? `
+    <!-- 家庭共享模式：API Key 密钥注入授权 -->
+    <div style="margin-bottom:14px; padding:12px; border-radius:8px; background:rgba(250,173,20,0.1); border:1px solid rgba(250,173,20,0.3);">
+      <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; font-size:12.5px; color:#f0f6fc; font-weight:600;">
+        <input id="cfgsync-inject-secrets-cb" type="checkbox" style="margin-top:2px; cursor:pointer; accent-color:#faad14; width:15px; height:15px;" />
+        <div>
+          <div>同时共享 API Key (让家人免配即可调模型)</div>
+          <div style="font-size:11px; color:#d29922; font-weight:normal; margin-top:3px; line-height:1.4;">
+            ⚠️ 勾选后，认领方在拉取时会自动将本账号的 API Key 写入其环境，明文不经前端传输；但认领后对方已持有密钥，即使撤销共享也无法追回已落盘的密钥，请仅对信任的家庭成员开启。
+          </div>
+        </div>
+      </label>
+    </div>
+    ` : ''}
+
     <!-- 区块 1: 生成分享码 -->
     <div style="margin-bottom:16px; padding:14px; border-radius:8px; background:#141720; border:1px solid rgba(255,255,255,0.08);">
       <div style="font-size:13px; font-weight:600; color:#f0f6fc; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
@@ -233,17 +248,20 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
   const resultBox = modal.querySelector('#cfgsync-code-result');
   const codeDisplay = modal.querySelector('#cfgsync-code-display');
   const copyBtn = modal.querySelector('#cfgsync-copy-code-btn');
+  const injectSecretsCb = modal.querySelector('#cfgsync-inject-secrets-cb');
 
   genBtn.onclick = async () => {
     genBtn.disabled = true;
     genBtn.textContent = '生成中...';
     try {
       const codeUsage = typeSelect.value;
+      const injectSecrets = Boolean(injectSecretsCb?.checked);
       const res = await api.createShareCode({
         contentType,
         itemUid,
         codeUsage,
         maxUses: codeUsage === 'multi_use' ? 0 : 1,
+        injectSecrets,
       });
       codeDisplay.textContent = res.share_code;
       resultBox.style.display = 'block';
@@ -274,11 +292,13 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
   publicBtn.onclick = async () => {
     publicBtn.disabled = true;
     const targetState = !isCurrentlyPublic;
+    const injectSecrets = Boolean(injectSecretsCb?.checked);
     try {
       await api.quickPublic({
         contentType,
         itemUid,
         enabled: targetState,
+        injectSecrets,
       });
       isCurrentlyPublic = targetState;
       if (isCurrentlyPublic) {

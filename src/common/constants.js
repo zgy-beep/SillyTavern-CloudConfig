@@ -106,4 +106,4 @@ export const ReloadStrategy = {
   NONE: 'none',
 };
 
-export const DEFAULT_MAX_VERSIONS = 10;
+export const DEFAULT_MAX_VERSIONS = 20;

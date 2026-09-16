@@ -47,11 +47,16 @@ export class SyncService {
    * @param {import('./AuthorizationService.js').AuthorizationService} authService
    * @param {number} [maxVersions]
    */
-  constructor(dbClient, adapters, snapshotStore, authService, maxVersions = DEFAULT_MAX_VERSIONS) {
+  constructor(dbClient, adapters, snapshotStore, authService, configService = null, maxVersions = DEFAULT_MAX_VERSIONS) {
+    if (configService && typeof configService === 'number') {
+      maxVersions = configService;
+      configService = null;
+    }
     this.db = dbClient;
     this.adapters = adapters;
     this.store = snapshotStore;
     this.auth = authService;
+    this.configService = configService;
     this.maxVersions = maxVersions;
 
     this.prepareStatements();
@@ -89,14 +94,29 @@ export class SyncService {
         AND current_version = :baseVersion
     `);
 
+    this.stmtDirectUpdate = this.db.prepare(`
+      UPDATE config_records
+      SET current_version = :nextVersion,
+          display_name = COALESCE(:displayName, display_name),
+          current_checksum = :checksum,
+          mime_type = :mimeType,
+          ext = :ext,
+          is_deleted = :isDeleted,
+          updated_at = :now,
+          updated_by_client = :clientId
+      WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid
+    `);
+
     this.stmtInsertVersion = this.db.prepare(`
       INSERT INTO config_versions (
         owner_handle, content_type, item_uid, version, operation,
-        checksum, mime_type, ext, blob_path, created_at, created_by_client
+        checksum, mime_type, ext, blob_path, version_title, size_bytes,
+        created_at, created_by_client
       )
       VALUES (
         :owner, :ct, :uid, :version, :op,
-        :checksum, :mimeType, :ext, :blobPath, :now, :clientId
+        :checksum, :mimeType, :ext, :blobPath, :versionTitle, :sizeBytes,
+        :now, :clientId
       )
     `);
 
@@ -115,7 +135,7 @@ export class SyncService {
     `);
 
     this.stmtGetVersionsDesc = this.db.prepare(`
-      SELECT version, blob_path, operation, checksum, created_at, created_by_client
+      SELECT version, version_title, size_bytes, blob_path, operation, checksum, created_at, created_by_client
       FROM config_versions
       WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid
       ORDER BY version DESC
@@ -163,7 +183,9 @@ export class SyncService {
     contentType,
     itemUid,
     displayName = null,
+    versionTitle = null,
     baseVersion,
+    force = null,
     operation = OperationType.UPSERT,
     checksum = null,
     payload = null,
@@ -177,12 +199,23 @@ export class SyncService {
     const adapter = this.getAdapter(contentType);
     const now = Date.now();
 
+    // 清洗 versionTitle：单行化、去空格、限长 64 字符、空串回退默认秒级时间名
+    let cleanTitle = null;
+    if (typeof versionTitle === 'string') {
+      cleanTitle = versionTitle.replace(/[\r\n]/g, ' ').trim().slice(0, 64);
+    }
+    if (!cleanTitle) {
+      const d = new Date(now);
+      const pad = (n) => String(n).padStart(2, '0');
+      cleanTitle = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} 备份`;
+    }
+
     let serialized = null;
     let actualChecksum = checksum;
 
     // 2. 数据校验与序列化
     if (operation === OperationType.UPSERT) {
-      // 若客户端未提供 payload（例如直接在面板触发推送到云端），则由适配器从本地真实文件读取
+      // 若客户端未提供 payload，则由适配器从本地真实文件读取
       if (payload === null || payload === undefined || (typeof payload === 'object' && Object.keys(payload).length === 0)) {
         try {
           payload = await adapter.read(authContext.directories, itemUid);
@@ -197,12 +230,24 @@ export class SyncService {
         throw new BadRequestError(`Invalid payload for content_type: ${contentType}`);
       }
       serialized = adapter.serialize(payload);
-      // 服务端根据规范化输出独立重新计算校验和
       actualChecksum = calcJsonChecksum(payload);
     }
 
-    // 3. base_version = 0 时尝试初始化占位行（ON CONFLICT DO NOTHING）
-    if (baseVersion === 0) {
+    const sizeBytes = serialized ? serialized.buffer.length : 0;
+
+    // 判断是否采用直推模式
+    const isForce = force !== null && force !== undefined
+      ? Boolean(force)
+      : Boolean(this.configService?.get('forcePush'));
+
+    // 获取当前云端记录
+    let currentRecord = this.stmtGetRecord.get({
+      ':owner': ownerHandle,
+      ':ct': contentType,
+      ':uid': itemUid,
+    });
+
+    if (!currentRecord) {
       this.stmtInitRecord.run({
         ':owner': ownerHandle,
         ':ct': contentType,
@@ -213,13 +258,21 @@ export class SyncService {
         ':now': now,
         ':clientId': clientId,
       });
+      currentRecord = this.stmtGetRecord.get({
+        ':owner': ownerHandle,
+        ':ct': contentType,
+        ':uid': itemUid,
+      });
     }
 
-    // 4. 计算预期版本号
-    const nextVersion = baseVersion + 1;
+    // 计算预期版本号
+    const nextVersion = isForce
+      ? (currentRecord ? currentRecord.current_version : 0) + 1
+      : (baseVersion !== undefined ? baseVersion + 1 : (currentRecord ? currentRecord.current_version : 0) + 1);
+
     let tempBlobInfo = null;
 
-    // 5. 写入临时 Blob 并落盘（DELETE 操作跳过）
+    // 写入临时 Blob 并落盘（DELETE 操作跳过）
     if (operation === OperationType.UPSERT && serialized) {
       tempBlobInfo = await this.store.prepareTempBlob(
         authContext.directories,
@@ -231,46 +284,64 @@ export class SyncService {
       );
     }
 
-    // 6. 执行原子 CAS 事务
+    // 执行原子事务
     let txSuccess = false;
     let committedVersion = 0;
     try {
       this.db.transaction(() => {
-        const updateInfo = this.stmtCasUpdate.run({
-          ':displayName': displayName,
-          ':checksum': actualChecksum,
-          ':mimeType': serialized ? serialized.mimeType : null,
-          ':ext': serialized ? serialized.ext : null,
-          ':isDeleted': operation === OperationType.DELETE ? 1 : 0,
-          ':now': now,
-          ':clientId': clientId,
-          ':owner': ownerHandle,
-          ':ct': contentType,
-          ':uid': itemUid,
-          ':baseVersion': baseVersion,
-        });
-
-        // CAS 竞争失败（受影响行数为 0）
-        if (updateInfo.changes === 0) {
-          const currentRecord = this.stmtGetRecord.get({
+        if (isForce) {
+          // 直推模式：直接覆盖递增版本，墓碑自动复活 (is_deleted = 0)
+          this.stmtDirectUpdate.run({
+            ':displayName': displayName,
+            ':checksum': actualChecksum,
+            ':mimeType': serialized ? serialized.mimeType : null,
+            ':ext': serialized ? serialized.ext : null,
+            ':isDeleted': operation === OperationType.DELETE ? 1 : 0,
+            ':now': now,
+            ':clientId': clientId,
             ':owner': ownerHandle,
             ':ct': contentType,
             ':uid': itemUid,
+            ':nextVersion': nextVersion,
           });
-          const serverVer = currentRecord ? currentRecord.current_version : 0;
-          const currentChk = currentRecord ? currentRecord.current_checksum : null;
-          const isDel = currentRecord ? Boolean(currentRecord.is_deleted) : false;
-          throw new ConflictError(
-            `Version conflict: expected base_version ${baseVersion}, but server is at version ${serverVer}`,
-            serverVer,
-            currentChk,
-            isDel
-          );
+        } else {
+          // CAS 模式
+          const updateInfo = this.stmtCasUpdate.run({
+            ':displayName': displayName,
+            ':checksum': actualChecksum,
+            ':mimeType': serialized ? serialized.mimeType : null,
+            ':ext': serialized ? serialized.ext : null,
+            ':isDeleted': operation === OperationType.DELETE ? 1 : 0,
+            ':now': now,
+            ':clientId': clientId,
+            ':owner': ownerHandle,
+            ':ct': contentType,
+            ':uid': itemUid,
+            ':baseVersion': baseVersion,
+          });
+
+          // CAS 竞争失败（受影响行数为 0）
+          if (updateInfo.changes === 0) {
+            const currentRec = this.stmtGetRecord.get({
+              ':owner': ownerHandle,
+              ':ct': contentType,
+              ':uid': itemUid,
+            });
+            const serverVer = currentRec ? currentRec.current_version : 0;
+            const currentChk = currentRec ? currentRec.current_checksum : null;
+            const isDel = currentRec ? Boolean(currentRec.is_deleted) : false;
+            throw new ConflictError(
+              `Version conflict: expected base_version ${baseVersion}, but server is at version ${serverVer}`,
+              serverVer,
+              currentChk,
+              isDel
+            );
+          }
         }
 
         committedVersion = nextVersion;
 
-        // 记录历史版本（指向正式的 targetPath）
+        // 记录历史版本（包含 version_title 与 size_bytes）
         this.stmtInsertVersion.run({
           ':owner': ownerHandle,
           ':ct': contentType,
@@ -281,6 +352,8 @@ export class SyncService {
           ':mimeType': serialized ? serialized.mimeType : null,
           ':ext': serialized ? serialized.ext : null,
           ':blobPath': tempBlobInfo ? tempBlobInfo.targetPath : null,
+          ':versionTitle': cleanTitle,
+          ':sizeBytes': sizeBytes,
           ':now': now,
           ':clientId': clientId,
         });
@@ -303,18 +376,24 @@ export class SyncService {
 
       txSuccess = true;
     } finally {
-      // 若事务失败或 CAS 冲突，仅清理未提交的临时 blob，绝不破坏已存在的正式版本文件
+      // 若事务失败，清理未提交的临时 blob
       if (!txSuccess && tempBlobInfo) {
         await this.store.deleteBlob(tempBlobInfo.tmpPath);
       }
     }
 
-    // 7. 异步触发历史版本修剪
-    this.pruneVersions(ownerHandle, contentType, itemUid).catch(() => {});
+    // 触发历史版本修剪
+    try {
+      await this.pruneVersions(ownerHandle, contentType, itemUid);
+    } catch (e) {
+      console.warn('[cfgsync] Pruning versions failed:', e.message);
+    }
 
     return {
       version: committedVersion,
       checksum: actualChecksum,
+      version_title: cleanTitle,
+      size_bytes: sizeBytes,
     };
   }
 
@@ -466,11 +545,12 @@ export class SyncService {
       ':uid': itemUid,
     });
 
-    if (versions.length <= this.maxVersions) {
+    const maxLimit = Number(this.configService?.get('maxVersions')) || this.maxVersions || 20;
+    if (versions.length <= maxLimit) {
       return;
     }
 
-    const toPrune = versions.slice(this.maxVersions);
+    const toPrune = versions.slice(maxLimit);
     for (const v of toPrune) {
       if (v.blob_path) {
         await this.store.deleteBlob(v.blob_path);

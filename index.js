@@ -10,6 +10,7 @@ import { ChangeEventBus } from './src/server/services/ChangeEventBus.js';
 import { SyncService } from './src/server/services/SyncService.js';
 import { AuditService } from './src/server/services/AuditService.js';
 import { ShareService } from './src/server/services/ShareService.js';
+import { ConfigService } from './src/server/config/ConfigService.js';
 import { createPluginRouter } from './src/server/routes/router.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -42,12 +43,13 @@ export async function init(router) {
   for (const [key, adapter] of p1Adapters) {
     adapters.set(key, adapter);
   }
+  const configService = new ConfigService(path.join(__dirname, 'data', 'cfgsync_config.json'));
   const snapshotStore = new SnapshotStore();
-  const authService = new AuthorizationService(dbClient);
-  const changeBus = new ChangeEventBus(dbClient);
+  const authService = new AuthorizationService(dbClient, configService);
+  const changeBus = new ChangeEventBus(dbClient, configService);
   const auditService = new AuditService(dbClient);
-  const shareService = new ShareService(dbClient, auditService);
-  const syncService = new SyncService(dbClient, adapters, snapshotStore, authService);
+  const shareService = new ShareService(dbClient, auditService, configService);
+  const syncService = new SyncService(dbClient, adapters, snapshotStore, authService, configService);
 
   // 3. 挂载前端扩展静态资源目录
   const clientDir = path.join(__dirname, 'src', 'client');
@@ -61,6 +63,7 @@ export async function init(router) {
     adapters,
     shareService,
     auditService,
+    configService,
   });
   router.use('/', pluginRouter);
 
