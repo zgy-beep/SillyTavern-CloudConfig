@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS config_versions (
   blob_path TEXT,
   version_title TEXT,
   size_bytes INTEGER DEFAULT 0,
+  is_locked INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   created_by_client TEXT,
   PRIMARY KEY (owner_handle, content_type, item_uid, version)

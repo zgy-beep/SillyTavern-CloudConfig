@@ -745,4 +745,115 @@ test('Integration: Phase 4 Visuals, Pruning, Delete & Server-Side Lock Protectio
     const pullEmpty = await fetch(`${baseUrl}/pull?content_type=openai_preset&item_uid=${snapUid}`);
     assert.equal(pullEmpty.status, 404);
   });
+
+  // TC19: Snapshot-level lock (POST /versions/lock) protects specific version from automatic prune replacement
+  await t.test('TC19: Snapshot lock protects pinned versions from rolling prune when exceeding maxVersions', async () => {
+    currentUser = 'alice';
+    currentUserDir = aliceDir;
+    currentUserAdmin = true;
+
+    // Set maxVersions to 3 for clean testing
+    await fetch(`${baseUrl}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxVersions: 3 }),
+    });
+
+    const pruneItemUid = makeItemUid('openai_preset', 'Prune_Lock_Test_Preset.json');
+
+    // 1. Push Version 1 (Base milestone version)
+    await fetch(`${baseUrl}/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'openai_preset',
+        item_uid: pruneItemUid,
+        payload: { ver: 1, name: 'Milestone 1' },
+        version_title: 'Milestone 1',
+        force: true,
+      }),
+    });
+
+    // 2. Lock Version 1
+    const lockRes = await fetch(`${baseUrl}/versions/lock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'openai_preset',
+        item_uid: pruneItemUid,
+        version: 1,
+        locked: true,
+      }),
+    });
+    assert.equal(lockRes.status, 200);
+    const lockData = await lockRes.json();
+    assert.equal(lockData.success, true);
+    assert.equal(lockData.version, 1);
+    assert.equal(lockData.is_locked, true);
+
+    // 3. Bob attempts to unlock Alice's version 1 -> 403 Forbidden
+    currentUser = 'bob';
+    currentUserDir = bobDir;
+    currentUserAdmin = false;
+    const bobLock = await fetch(`${baseUrl}/versions/lock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'openai_preset',
+        item_uid: pruneItemUid,
+        version: 1,
+        locked: false,
+        owner: 'alice',
+      }),
+    });
+    assert.equal(bobLock.status, 403);
+
+    // 4. Alice pushes versions 2, 3, 4 (total 4 versions, exceeding maxVersions = 3)
+    currentUser = 'alice';
+    currentUserDir = aliceDir;
+    for (let v = 2; v <= 4; v++) {
+      await fetch(`${baseUrl}/push`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content_type: 'openai_preset',
+          item_uid: pruneItemUid,
+          payload: { ver: v },
+          version_title: `Auto Backup ${v}`,
+          force: true,
+        }),
+      });
+    }
+
+    // 5. Query GET /versions
+    const vRes = await fetch(`${baseUrl}/versions?content_type=openai_preset&item_uid=${pruneItemUid}`);
+    const vData = await vRes.json();
+    const returnedVersions = vData.versions.map(x => x.version);
+
+    // Version 1 (LOCKED) MUST still be present!
+    assert.ok(returnedVersions.includes(1), `Version 1 was locked and must NOT be pruned! Present: ${returnedVersions}`);
+    const v1Obj = vData.versions.find(x => x.version === 1);
+    assert.equal(v1Obj.is_locked, true);
+
+    // Version 2 (UNLOCKED) was the oldest unlocked version, so it MUST have been pruned!
+    assert.ok(!returnedVersions.includes(2), 'Version 2 was unlocked and oldest, should be pruned');
+
+    // Total remaining versions is 3: [4, 3, 1]
+    assert.deepEqual(returnedVersions.sort((a, b) => a - b), [1, 3, 4]);
+
+    // 6. Alice unlocks version 1
+    const unlockRes = await fetch(`${baseUrl}/versions/lock`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'openai_preset',
+        item_uid: pruneItemUid,
+        version: 1,
+        locked: false,
+      }),
+    });
+    assert.equal(unlockRes.status, 200);
+    const unlockData = await unlockRes.json();
+    assert.equal(unlockData.is_locked, false);
+  });
 });

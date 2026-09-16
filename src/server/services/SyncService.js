@@ -135,10 +135,16 @@ export class SyncService {
     `);
 
     this.stmtGetVersionsDesc = this.db.prepare(`
-      SELECT version, version_title, size_bytes, blob_path, operation, checksum, created_at, created_by_client
+      SELECT version, version_title, size_bytes, blob_path, operation, checksum, created_at, created_by_client, is_locked
       FROM config_versions
       WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid
       ORDER BY version DESC
+    `);
+
+    this.stmtSetVersionLock = this.db.prepare(`
+      UPDATE config_versions
+      SET is_locked = :locked
+      WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid AND version = :version
     `);
 
     this.stmtDeleteVersionRow = this.db.prepare(`
@@ -568,7 +574,7 @@ export class SyncService {
   }
 
   /**
-   * 异步修剪超额历史版本
+   * 异步修剪超额历史版本（防替换保护：已锁定的版本永不被轮转修剪；最新的版本永不修剪）
    */
   async pruneVersions(ownerHandle, contentType, itemUid) {
     const versions = this.stmtGetVersionsDesc.all({
@@ -582,10 +588,22 @@ export class SyncService {
       return;
     }
 
-    const toPrune = versions.slice(maxLimit);
+    const toPrune = [];
+    let currentCount = versions.length;
+    // 从最旧的历史版本向新版本遍历（保留最新的 index 0 版本不剪裁）
+    // 只要该版本被用户锁定（is_locked === 1），绝对不自动剪裁/替换！
+    for (let i = versions.length - 1; i >= 1; i--) {
+      if (currentCount <= maxLimit) break;
+      const v = versions[i];
+      if (!v.is_locked) {
+        toPrune.push(v);
+        currentCount--;
+      }
+    }
+
     for (const v of toPrune) {
       if (v.blob_path) {
-        await this.store.deleteBlob(v.blob_path);
+        await this.store.deleteBlob(v.blob_path).catch(() => {});
       }
       this.stmtDeleteVersionRow.run({
         ':owner': ownerHandle,
@@ -594,6 +612,34 @@ export class SyncService {
         ':version': v.version,
       });
     }
+  }
+
+  /**
+   * 锁定或解锁指定快照版本（锁定后滚动超出限制时永不被替换删除）
+   */
+  async setVersionLock(authContext, ownerHandle, contentType, itemUid, targetVersion, locked) {
+    if (!this.auth.can(Permission.WRITE, authContext.handle, ownerHandle, contentType, itemUid)) {
+      throw new ForbiddenError(`User '${authContext.handle}' has no write permission to lock version`);
+    }
+
+    const lockVal = locked ? 1 : 0;
+    const result = this.stmtSetVersionLock.run({
+      ':owner': ownerHandle,
+      ':ct': contentType,
+      ':uid': itemUid,
+      ':version': targetVersion,
+      ':locked': lockVal,
+    });
+
+    if (result.changes === 0) {
+      throw new NotFoundError(`Version ${targetVersion} of ${contentType}/${itemUid} not found`);
+    }
+
+    return {
+      success: true,
+      version: targetVersion,
+      is_locked: Boolean(locked),
+    };
   }
 
   /**

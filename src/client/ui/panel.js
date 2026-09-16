@@ -626,7 +626,6 @@ export class CloudConfigPanel {
               itemUid: row.dataset.itemUid,
               owner,
               isCrossAccount: Boolean(owner && owner !== this.accountHandle),
-              isLocked: row._isLocked,
               api: this.api,
               onRestore: async (targetVer) => {
                 await this.restoreSnapshot(row, row.dataset.contentType, { displayName, itemUid: row.dataset.itemUid }, targetVer);
@@ -638,15 +637,6 @@ export class CloudConfigPanel {
           };
         }
       }
-    }
-
-    // 2.5 同步防替换锁定按钮状态
-    const lockBtn = row.querySelector('.cfgsync-lock-btn');
-    if (lockBtn) {
-      const isLocked = Boolean(cItem?.is_locked !== undefined ? cItem.is_locked : row._isLocked);
-      row._isLocked = isLocked;
-      const owner = cItem?.owner_handle || this.accountHandle;
-      this.updateLockBtnState(lockBtn, isLocked, owner);
     }
 
     // 3. 按钮状态与视觉区分
@@ -765,13 +755,10 @@ export class CloudConfigPanel {
         <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">
           ${this.renderVersionSelectorHtml(state, version, hasCloud ? cItem : null, initialBinding)}
         </div>
-        <button class="cfgsync-lock-btn menu_button" title="${isLocked ? `已锁定${lockOwnerTip}，阻止云端拉取覆盖本地 (点击解锁)` : '未锁定 (点击锁定防替换覆盖)'}" style="white-space:nowrap !important; width:24px !important; min-width:24px !important; max-width:24px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; background:${isLocked ? 'rgba(250,173,20,0.18)' : 'transparent'}; border:1px solid ${isLocked ? 'rgba(250,173,20,0.45)' : 'rgba(255,255,255,0.12)'}; color:${isLocked ? '#faad14' : 'rgba(255,255,255,0.4)'};">
-          <i class="fa-solid ${isLocked ? 'fa-lock' : 'fa-lock-open'}"></i>
-        </button>
         <button class="cfgsync-push-btn menu_button" title="${hasCloud ? '推送到云端 (上传新快照覆盖云端)' : '未同步：立即推送到云端生成首个快照'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; ${!row._existsLocally ? 'opacity:0.25 !important; pointer-events:none;' : (!hasCloud ? 'opacity:1 !important; background:rgba(31,111,235,0.22) !important; border:1px solid rgba(88,166,255,0.5) !important; color:#58a6ff !important;' : 'opacity:0.9;')}">
           <i class="fa-solid fa-cloud-arrow-up"></i>
         </button>
-        <button class="cfgsync-pull-btn menu_button" title="${hasCloud ? (isLocked ? '已开启防替换锁定保护 (需先解锁方可覆盖本地)' : '从云端拉取 (下载覆盖本地)') : '云端暂无此配置，无法拉取'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'opacity:0.9; cursor:pointer !important;'}">
+        <button class="cfgsync-pull-btn menu_button" title="${hasCloud ? '从云端拉取 (下载覆盖本地)' : '云端暂无此配置，无法拉取'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'opacity:0.9; cursor:pointer !important;'}">
           <i class="fa-solid fa-cloud-arrow-down"></i>
         </button>
         <button class="cfgsync-share-btn menu_button" title="${hasCloud ? '分享配置 (生成邀请码 / 设为公开)' : '尚未推送到云端，无法分享'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'opacity:0.9; cursor:pointer !important;'}">
@@ -798,7 +785,6 @@ export class CloudConfigPanel {
           itemUid: item.itemUid,
           owner,
           isCrossAccount: Boolean(owner && owner !== this.accountHandle),
-          isLocked: row._isLocked,
           api: this.api,
           onRestore: async (targetVer) => {
             await this.restoreSnapshot(row, contentType, item, targetVer);
@@ -833,38 +819,6 @@ export class CloudConfigPanel {
         toggle.disabled = false;
       }
     };
-
-    // 防替换锁定切换
-    const lockBtn = row.querySelector('.cfgsync-lock-btn');
-    if (lockBtn) {
-      lockBtn.onclick = async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        lockBtn.disabled = true;
-        const targetLocked = !row._isLocked;
-        const owner = row._cloudItem?.owner_handle || this.accountHandle;
-        try {
-          const res = await this.api.setLock({
-            contentType,
-            itemUid: item.itemUid,
-            owner,
-            locked: targetLocked,
-          });
-          row._isLocked = Boolean(res.is_locked);
-          this.updateLockBtnState(lockBtn, row._isLocked, owner);
-          const pBtn = row.querySelector('.cfgsync-pull-btn');
-          if (pBtn && row._cloudItem) {
-            pBtn.title = row._isLocked
-              ? '已开启防替换锁定保护 (需先解锁方可覆盖本地)'
-              : '从云端拉取 (下载覆盖本地)';
-          }
-        } catch (err) {
-          alert(`修改锁定状态失败: ${err.message}`);
-        } finally {
-          lockBtn.disabled = false;
-        }
-      };
-    }
 
     // 手动推送到云端（支持时间快照、自定义备注、缓存精简与网盘式直传）
     const pushBtn = row.querySelector('.cfgsync-push-btn');

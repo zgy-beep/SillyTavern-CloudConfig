@@ -344,7 +344,7 @@ export function createPluginRouter({
     }
 
     const versions = await syncService.getVersions(req.authContext, owner, contentType, itemUid);
-    res.json({ versions: versions.map(v => ({ ...v, size_bytes: v.size_bytes || 0 })) });
+    res.json({ versions: versions.map(v => ({ ...v, size_bytes: v.size_bytes || 0, is_locked: Boolean(v.is_locked) })) });
   }));
 
   // 6.5 DELETE /versions (删除指定快照版本)
@@ -358,6 +358,26 @@ export function createPluginRouter({
 
     const success = await syncService.deleteVersion(req.authContext, owner, contentType, itemUid, Number(version));
     res.json({ success });
+  }));
+
+  // 6.6 POST /versions/lock (锁定或解锁指定快照版本，防替换剪裁保护)
+  router.post('/versions/lock', asyncHandler(async (req, res) => {
+    const { content_type: contentType, item_uid: itemUid, version, locked } = req.body;
+    const owner = req.body.owner || req.authContext.handle;
+
+    if (!contentType || !itemUid || version === undefined || locked === undefined) {
+      return res.status(400).json({ error: 'BadRequest', message: 'content_type, item_uid, version, and locked are required' });
+    }
+
+    const result = await syncService.setVersionLock(
+      req.authContext,
+      owner,
+      contentType,
+      itemUid,
+      Number(version),
+      Boolean(locked),
+    );
+    res.json(result);
   }));
 
   // 7. POST /rollback

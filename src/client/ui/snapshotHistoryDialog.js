@@ -1,5 +1,5 @@
 /**
- * 云端快照历史记录弹窗 (全面替代原生 select，解决白底白字与截断问题，支持单版本还原与删除)
+ * 云端快照历史记录弹窗 (支持单快照锁定防替换、单快照还原与删除)
  */
 
 function formatRelativeTime(timestampMs) {
@@ -41,7 +41,6 @@ function formatBytes(bytes) {
  * @param {string} params.itemUid
  * @param {string} params.owner
  * @param {boolean} params.isCrossAccount
- * @param {boolean} params.isLocked
  * @param {object} params.api
  * @param {(version: number) => Promise<void>} params.onRestore
  * @param {(deletedVersion: number) => Promise<void>} params.onDeleteVersion
@@ -52,7 +51,6 @@ export function showSnapshotHistoryDialog({
   itemUid,
   owner,
   isCrossAccount = false,
-  isLocked = false,
   api,
   onRestore,
   onDeleteVersion,
@@ -70,7 +68,7 @@ export function showSnapshotHistoryDialog({
   modal.style.cssText = `
     background: #1c202a !important;
     color: #e6edf3 !important;
-    padding: 22px 24px; border-radius: 12px; max-width: 520px; width: 92%; max-height: 82vh;
+    padding: 22px 24px; border-radius: 12px; max-width: 560px; width: 92%; max-height: 82vh;
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.1);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     box-sizing: border-box; display: flex; flex-direction: column;
@@ -91,6 +89,12 @@ export function showSnapshotHistoryDialog({
         </div>
       </div>
       <button id="cfgsync-history-close-x" type="button" style="width:26px; height:26px; border-radius:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#8b949e; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0; transition:all 0.15s ease;">&times;</button>
+    </div>
+
+    <!-- 提示栏：防替换锁定说明 -->
+    <div style="background:rgba(250,173,20,0.08); border:1px solid rgba(250,173,20,0.22); border-radius:6px; padding:6px 10px; margin-bottom:12px; font-size:11px; color:#faad14; display:flex; align-items:center; gap:6px; flex-shrink:0;">
+      <i class="fa-solid fa-shield-halved" style="font-size:12px;"></i>
+      <span>提示：每个配置项上限保存 20 个快照，超额自动淘汰最旧快照。点击快照右侧的 <strong>锁定</strong> 即可永久固定，轮转时绝不被替换！</span>
     </div>
 
     <!-- 快照列表容器 -->
@@ -131,6 +135,13 @@ export function showSnapshotHistoryDialog({
   const listContainer = modal.querySelector('#cfgsync-history-list');
   const summaryEl = modal.querySelector('#cfgsync-history-summary');
 
+  // 更新底部统计文案
+  const updateSummaryText = (versions) => {
+    const total = versions.length;
+    const lockedCount = versions.filter(v => Boolean(v.is_locked)).length;
+    summaryEl.textContent = `共 ${total} 个快照 (已锁定 ${lockedCount} 个 · 自动轮转保留最近 20 个)`;
+  };
+
   // 异步加载快照列表
   (async () => {
     try {
@@ -148,7 +159,7 @@ export function showSnapshotHistoryDialog({
         return;
       }
 
-      summaryEl.textContent = `共 ${allVersions.length} 个云端快照 (自动滚动保留最近 20 个)`;
+      updateSummaryText(allVersions);
       listContainer.innerHTML = '';
 
       allVersions.forEach((v, index) => {
@@ -160,14 +171,22 @@ export function showSnapshotHistoryDialog({
 
         const row = document.createElement('div');
         row.className = 'cfgsync-snapshot-item';
+        row.dataset.version = String(v.version);
+
+        const updateRowBorder = () => {
+          row.style.borderLeft = v.is_locked
+            ? '3px solid #faad14'
+            : (isLatest ? '3px solid #2ea043' : '3px solid rgba(255, 255, 255, 0.15)');
+        };
+
         row.style.cssText = `
           background: rgba(255, 255, 255, 0.03);
           border: 1px solid rgba(255, 255, 255, 0.08);
-          border-left: ${isLatest ? '3px solid #2ea043' : '3px solid rgba(255, 255, 255, 0.15)'};
           border-radius: 8px; padding: 10px 12px;
           display: flex; align-items: center; justify-content: space-between; gap: 10px;
           transition: background 0.15s ease;
         `;
+        updateRowBorder();
         row.onmouseenter = () => { row.style.background = 'rgba(255, 255, 255, 0.06)'; };
         row.onmouseleave = () => { row.style.background = 'rgba(255, 255, 255, 0.03)'; };
 
@@ -181,6 +200,9 @@ export function showSnapshotHistoryDialog({
               ${isLatest ? `
                 <span style="background:rgba(46,160,67,0.18); color:#3fb950; border:1px solid rgba(46,160,67,0.4); padding:0 5px; border-radius:4px; font-size:10px; font-weight:600; flex-shrink:0;">最新</span>
               ` : ''}
+              <span class="cfgsync-snapshot-locked-badge" style="display:${v.is_locked ? 'inline-flex' : 'none'}; align-items:center; gap:3px; background:rgba(250,173,20,0.15); color:#faad14; border:1px solid rgba(250,173,20,0.35); padding:0 5px; border-radius:4px; font-size:10px; font-weight:600; flex-shrink:0;">
+                <i class="fa-solid fa-lock" style="font-size:9px;"></i>固定防替换
+              </span>
             </div>
             <div style="font-size:11px; color:#8b949e; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
               <span title="${absoluteTime}"><i class="fa-regular fa-clock" style="font-size:10px; margin-right:3px;"></i>${relativeTime}</span>
@@ -191,24 +213,76 @@ export function showSnapshotHistoryDialog({
 
           <!-- 操作按钮区 -->
           <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-            <button class="cfgsync-restore-snapshot-btn" type="button" title="拉取此快照覆盖本地文件" style="display:inline-flex; align-items:center; gap:5px; padding:5px 12px; border-radius:6px; font-size:11.5px; font-weight:500; background:rgba(88,166,255,0.12); border:1px solid rgba(88,166,255,0.35); color:#58a6ff; cursor:pointer; transition:all 0.15s ease;">
+            <!-- 锁定/解锁防替换按钮 -->
+            <button class="cfgsync-lock-snapshot-btn" type="button" style="display:inline-flex; align-items:center; gap:4px; padding:5px 9px; border-radius:6px; font-size:11.5px; font-weight:500; cursor:pointer; transition:all 0.15s ease;">
+              <i class="fa-solid ${v.is_locked ? 'fa-lock' : 'fa-lock-open'}"></i>
+              <span>${v.is_locked ? '已锁定' : '锁定'}</span>
+            </button>
+
+            <!-- 还原按钮 -->
+            <button class="cfgsync-restore-snapshot-btn" type="button" title="拉取此快照覆盖本地文件" style="display:inline-flex; align-items:center; gap:4px; padding:5px 11px; border-radius:6px; font-size:11.5px; font-weight:500; background:rgba(88,166,255,0.12); border:1px solid rgba(88,166,255,0.35); color:#58a6ff; cursor:pointer; transition:all 0.15s ease;">
               <i class="fa-solid fa-cloud-arrow-down" style="font-size:11px;"></i>
               <span>还原</span>
             </button>
-            <button class="cfgsync-del-snapshot-btn" type="button" title="删除此历史快照" style="width:26px; height:26px; border-radius:6px; background:transparent; border:1px solid rgba(255,255,255,0.12); color:rgba(255,255,255,0.4); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:11px; transition:all 0.15s ease;">
+
+            <!-- 删除按钮 -->
+            <button class="cfgsync-del-snapshot-btn" type="button" title="${v.is_locked ? '已锁定：需先解锁方可删除' : '删除此历史快照'}" style="width:26px; height:26px; border-radius:6px; background:transparent; border:1px solid rgba(255,255,255,0.12); color:rgba(255,255,255,0.4); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:11px; transition:all 0.15s ease;">
               <i class="fa-regular fa-trash-can"></i>
             </button>
           </div>
         `;
 
+        const lockBtn = row.querySelector('.cfgsync-lock-snapshot-btn');
+        const lockedBadge = row.querySelector('.cfgsync-snapshot-locked-badge');
+
+        const updateLockBtnStyle = () => {
+          if (v.is_locked) {
+            lockBtn.title = '已锁定：版本超额时永久保留，永不被自动替换淘汰 (点击解锁)';
+            lockBtn.style.background = 'rgba(250, 173, 20, 0.16)';
+            lockBtn.style.borderColor = 'rgba(250, 173, 20, 0.45)';
+            lockBtn.style.color = '#faad14';
+            lockBtn.innerHTML = '<i class="fa-solid fa-lock" style="font-size:10px;"></i><span>已锁定</span>';
+            lockedBadge.style.display = 'inline-flex';
+          } else {
+            lockBtn.title = '点击锁定：快照超额(20个)时永久保留，不被自动替换淘汰';
+            lockBtn.style.background = 'rgba(255, 255, 255, 0.05)';
+            lockBtn.style.borderColor = 'rgba(255, 255, 255, 0.14)';
+            lockBtn.style.color = '#8b949e';
+            lockBtn.innerHTML = '<i class="fa-solid fa-lock-open" style="font-size:10px;"></i><span>锁定</span>';
+            lockedBadge.style.display = 'none';
+          }
+          updateRowBorder();
+        };
+        updateLockBtnStyle();
+
+        // 切换快照锁定状态 (防替换保护)
+        lockBtn.onclick = async () => {
+          lockBtn.disabled = true;
+          const origHtml = lockBtn.innerHTML;
+          lockBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+          try {
+            const targetLocked = !v.is_locked;
+            await api.setVersionLock({
+              contentType,
+              itemUid,
+              version: v.version,
+              locked: targetLocked,
+              owner,
+            });
+            v.is_locked = targetLocked;
+            updateLockBtnStyle();
+            updateSummaryText(allVersions);
+          } catch (err) {
+            lockBtn.innerHTML = origHtml;
+            alert(`修改锁定状态失败: ${err.message}`);
+          } finally {
+            lockBtn.disabled = false;
+          }
+        };
+
         // 还原快照
         const restoreBtn = row.querySelector('.cfgsync-restore-snapshot-btn');
         restoreBtn.onclick = async () => {
-          if (isLocked) {
-            alert('【拉取已被防替换锁定保护拦截】\n\n当前配置已开启防替换锁定保护，阻止来自云端的覆盖！\n如需还原历史快照到本地，请先在主面板点击金色 🔒 图标解除锁定。');
-            return;
-          }
-
           const confirmed = confirm(`确定要将【${displayName}】还原到此快照吗？\n\n快照名称: ${displayNameTitle}\n时间: ${absoluteTime}\n\n注意：当前本地对应的文件将被此快照覆盖替换。`);
           if (!confirmed) return;
 
@@ -239,6 +313,11 @@ export function showSnapshotHistoryDialog({
           delBtn.style.background = 'transparent';
         };
         delBtn.onclick = async () => {
+          if (v.is_locked) {
+            alert('【该快照已被锁定防替换保护】\n\n此快照处于锁定保护状态，防止被淘汰或误删。\n如确实需要删除，请先点击【已锁定】按钮解除锁定后再执行删除。');
+            return;
+          }
+
           const confirmed = confirm(`确定要删除此云端快照吗？\n\n快照名称: ${displayNameTitle}\n时间: ${absoluteTime}\n\n删除后该快照将无法找回。`);
           if (!confirmed) return;
 
@@ -254,10 +333,11 @@ export function showSnapshotHistoryDialog({
 
             // 成功后移除该行
             row.remove();
-            const remainingRows = listContainer.querySelectorAll('.cfgsync-snapshot-item');
-            summaryEl.textContent = `共 ${remainingRows.length} 个云端快照 (自动滚动保留最近 20 个)`;
+            const idx = allVersions.indexOf(v);
+            if (idx !== -1) allVersions.splice(idx, 1);
+            updateSummaryText(allVersions);
 
-            if (remainingRows.length === 0) {
+            if (allVersions.length === 0) {
               listContainer.innerHTML = `
                 <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:120px; color:#8b949e; font-size:12.5px; gap:6px;">
                   <i class="fa-regular fa-folder-open" style="font-size:24px; opacity:0.4;"></i>

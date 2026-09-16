@@ -151,6 +151,19 @@ export class CloudConfigApi {
     });
   }
 
+  async setVersionLock({ contentType, itemUid, version, locked, owner = null }) {
+    return this.request('/versions/lock', {
+      method: 'POST',
+      body: JSON.stringify({
+        content_type: contentType,
+        item_uid: itemUid,
+        version,
+        locked,
+        owner,
+      }),
+    });
+  }
+
   async rollback({ contentType, itemUid, targetVersion, baseVersion, clientId }) {
     return this.request('/rollback', {
       method: 'POST',

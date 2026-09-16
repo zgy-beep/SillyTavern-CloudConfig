@@ -90,6 +90,17 @@ export class DatabaseClient {
         this.db.exec('PRAGMA user_version = 4;');
       });
     }
+
+    if (currentVersion < 5) {
+      this.transaction(() => {
+        const verInfo = this.db.prepare("PRAGMA table_info('config_versions');").all();
+        const verCols = verInfo.map(c => c.name);
+        if (!verCols.includes('is_locked')) {
+          this.db.exec('ALTER TABLE config_versions ADD COLUMN is_locked INTEGER NOT NULL DEFAULT 0;');
+        }
+        this.db.exec('PRAGMA user_version = 5;');
+      });
+    }
   }
 
   /**
