@@ -1,14 +1,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ConfigAdapter } from './ConfigAdapter.js';
+import { ConfigAdapter, MergeStrategy } from './ConfigAdapter.js';
 import { canonicalizeJson } from '../../common/utils.js';
 
 /**
  * 针对纯 JSON 类配置的统一抽象基类
  */
 export class JsonConfigAdapter extends ConfigAdapter {
-  constructor(contentType) {
-    super(contentType);
+  constructor(contentType, mergeStrategy = MergeStrategy.REPLACE) {
+    super(contentType, mergeStrategy);
   }
 
   serialize(content) {

@@ -1,5 +1,5 @@
 import { OperationType, Permission, DEFAULT_MAX_VERSIONS } from '../../common/constants.js';
-import { calcJsonChecksum } from '../../common/utils.js';
+import { calcJsonChecksum, sha256 } from '../../common/utils.js';
 
 export class ConflictError extends Error {
   constructor(message, serverVersion, currentChecksum, isDeleted = false) {
@@ -268,7 +268,7 @@ export class SyncService {
         throw new BadRequestError(`Invalid payload for content_type: ${contentType}`);
       }
       serialized = adapter.serialize(payload);
-      actualChecksum = calcJsonChecksum(payload);
+      actualChecksum = sha256(adapter.canonicalize(payload));
     }
 
     const sizeBytes = serialized ? serialized.buffer.length : 0;
@@ -583,7 +583,9 @@ export class SyncService {
       ':uid': itemUid,
     });
 
-    const maxLimit = Number(this.configService?.get('maxVersions')) || this.maxVersions || 20;
+    const maxLimit = this.configService?.getMaxVersions
+      ? this.configService.getMaxVersions(contentType)
+      : (Number(this.configService?.get('maxVersions')) || this.maxVersions || 20);
     if (versions.length <= maxLimit) {
       return;
     }

@@ -1,16 +1,38 @@
 /**
+ * 写入合并策略枚举
+ */
+export const MergeStrategy = Object.freeze({
+  REPLACE: 'REPLACE',          // 二进制（角色卡、主题、背景）：原子写盘，绝不走 deepMerge
+  MERGE: 'MERGE',              // 通用设置（settings 专属）：按键深度合并，保留本地独有键
+  APPEND_MERGE: 'APPEND_MERGE' // 历史记录（chat 专属）：mid/legacy 并集，swipes 并集，元数据本地优先
+});
+
+/**
  * ConfigAdapter 抽象基类
  * 定义配置类型与 ST 本地文件交互的统一契约
  */
 export class ConfigAdapter {
   /**
    * @param {string} contentType
+   * @param {string} [mergeStrategy]
    */
-  constructor(contentType) {
+  constructor(contentType, mergeStrategy = MergeStrategy.REPLACE) {
     if (new.target === ConfigAdapter) {
       throw new TypeError('Cannot construct ConfigAdapter instances directly');
     }
+    if (!Object.values(MergeStrategy).includes(mergeStrategy)) {
+      throw new TypeError(`Invalid or undeclared mergeStrategy: ${mergeStrategy}`);
+    }
     this.contentType = contentType;
+    this.mergeStrategy = mergeStrategy;
+  }
+
+  /**
+   * 获取当前适配器的合并策略
+   * @returns {string}
+   */
+  getMergeStrategy() {
+    return this.mergeStrategy;
   }
 
   /**

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import { JsonConfigAdapter } from './JsonConfigAdapter.js';
+import { MergeStrategy } from './ConfigAdapter.js';
 import { makeItemUid } from '../../common/utils.js';
 import { ReloadStrategy } from '../../common/constants.js';
 
@@ -221,7 +222,7 @@ export async function cleanupStraySecrets(dataDir = null) {
  */
 export class SettingsAdapter extends JsonConfigAdapter {
   constructor() {
-    super('settings');
+    super('settings', MergeStrategy.MERGE);
   }
 
   /**
@@ -346,8 +347,8 @@ export class DirectoryJsonConfigAdapter extends JsonConfigAdapter {
    * @param {(directories: any) => string[]} getCandidateDirs
    * @param {string} reloadStrategy
    */
-  constructor(contentType, getPrimaryDirFn, getCandidateDirs, reloadStrategy) {
-    super(contentType);
+  constructor(contentType, getPrimaryDirFn, getCandidateDirs, reloadStrategy, mergeStrategy = MergeStrategy.REPLACE) {
+    super(contentType, mergeStrategy);
     this.getPrimaryDirFn = getPrimaryDirFn;
     this.getCandidateDirs = getCandidateDirs;
     this.reloadStrategy = reloadStrategy;
@@ -437,6 +438,7 @@ export class DirectoryJsonConfigAdapter extends JsonConfigAdapter {
     const filePath = path.join(targetDir, targetFileName);
 
     if (operation === 'UPSERT') {
+      await autoBackupLocalFile(filePath);
       await this.safeWriteJson(filePath, content);
     } else if (operation === 'DELETE') {
       await this.safeDeleteFile(filePath);

@@ -5,6 +5,12 @@ export const DEFAULT_CONFIG = Object.freeze({
   allowSettingsSharing: false, // 默认关闭（多用户安全底线）
   forcePush: true,             // 默认开启网盘直传模式
   maxVersions: 20,             // 快照上限
+  maxVersionsByType: {
+    character: 5,              // 二进制角色卡（单卡 ~3.1MB，5 版约 15MB）
+    theme: 5,                  // 主题配置
+    background: 3,             // 背景图
+    chat: 5,                   // 聊天记录
+  },
   excludeHeavyExtensions: true // 默认排除酒馆助手巨大缓存 (~4.7MB)
 });
 
@@ -50,6 +56,14 @@ export class ConfigService {
 
   get(key) {
     return this.config[key] !== undefined ? this.config[key] : DEFAULT_CONFIG[key];
+  }
+
+  getMaxVersions(contentType) {
+    const byType = this.config.maxVersionsByType || DEFAULT_CONFIG.maxVersionsByType;
+    if (byType && typeof byType === 'object' && byType[contentType] !== undefined) {
+      return Number(byType[contentType]) || 5;
+    }
+    return Number(this.get('maxVersions')) || 20;
   }
 
   getAll() {

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseClient } from './src/server/db/database.js';
 import { createP0Adapters, cleanupStraySecrets } from './src/server/adapters/P0Adapters.js';
 import { createP1Adapters } from './src/server/adapters/P1Adapters.js';
+import { createP2Adapters } from './src/server/adapters/P2Adapters.js';
 import { SnapshotStore } from './src/server/storage/SnapshotStore.js';
 import { AuthorizationService } from './src/server/services/AuthorizationService.js';
 import { ChangeEventBus } from './src/server/services/ChangeEventBus.js';
@@ -41,6 +42,10 @@ export async function init(router) {
   const adapters = createP0Adapters();
   const p1Adapters = createP1Adapters();
   for (const [key, adapter] of p1Adapters) {
+    adapters.set(key, adapter);
+  }
+  const p2Adapters = createP2Adapters();
+  for (const [key, adapter] of p2Adapters) {
     adapters.set(key, adapter);
   }
   const configService = new ConfigService(path.join(__dirname, 'data', 'cfgsync_config.json'));
