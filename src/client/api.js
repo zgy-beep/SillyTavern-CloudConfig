@@ -136,4 +136,68 @@ export class CloudConfigApi {
       }),
     });
   }
+
+  // --- Phase 2: 分享与认领 API ---
+
+  async createShareCode({ contentType, itemUid, scopeType = 'ITEM', codeUsage = 'single_use', maxUses = 1, expiresInMs }) {
+    return this.request('/shares/create-code', {
+      method: 'POST',
+      body: JSON.stringify({
+        content_type: contentType,
+        item_uid: itemUid,
+        scope_type: scopeType,
+        code_usage: codeUsage,
+        max_uses: maxUses,
+        expires_in_ms: expiresInMs,
+      }),
+    });
+  }
+
+  async claimShareCode(shareCode, clientId) {
+    return this.request('/shares/claim-code', {
+      method: 'POST',
+      body: JSON.stringify({
+        share_code: shareCode,
+        client_id: clientId,
+      }),
+    });
+  }
+
+  async quickPublic({ contentType, itemUid, scopeType = 'ITEM', enabled = true }) {
+    return this.request('/shares/quick-public', {
+      method: 'POST',
+      body: JSON.stringify({
+        content_type: contentType,
+        item_uid: itemUid,
+        scope_type: scopeType,
+        enabled,
+      }),
+    });
+  }
+
+  async revokeShare({ grantId, shareCodeHash }) {
+    return this.request('/shares/revoke', {
+      method: 'POST',
+      body: JSON.stringify({
+        grant_id: grantId,
+        share_code_hash: shareCodeHash,
+      }),
+    });
+  }
+
+  async getOutgoingShares() {
+    return this.request('/shares/outgoing');
+  }
+
+  async getIncomingShares() {
+    return this.request('/shares/incoming');
+  }
+
+  async getAuditLogs(limit = 50, since = 0) {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      since: String(since),
+    });
+    return this.request(`/audit?${params.toString()}`);
+  }
 }

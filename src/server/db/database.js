@@ -28,6 +28,27 @@ export class DatabaseClient {
     }
     this.db.exec('PRAGMA foreign_keys = ON;');
     this.db.exec(SCHEMA_SQL);
+
+    // 模式版本守卫与增量迁移（Phase 2: user_version 2）
+    const versionRow = this.db.prepare('PRAGMA user_version;').get();
+    const currentVersion = versionRow ? versionRow.user_version : 0;
+    if (currentVersion < 2) {
+      const tableInfo = this.db.prepare("PRAGMA table_info('share_grants');").all();
+      const colNames = tableInfo.map(c => c.name);
+      if (!colNames.includes('is_public')) {
+        this.db.exec('ALTER TABLE share_grants ADD COLUMN is_public INTEGER NOT NULL DEFAULT 0;');
+      }
+      if (!colNames.includes('max_uses')) {
+        this.db.exec('ALTER TABLE share_grants ADD COLUMN max_uses INTEGER NOT NULL DEFAULT 0;');
+      }
+      // 仅迁移历史存量 active 记录（历史公开分享），绝对不修改后续新代码创建的 pending 邀请码
+      this.db.exec(`
+        UPDATE share_grants 
+        SET is_public = 1 
+        WHERE grantee_handle IS NULL AND is_public = 0 AND status = 'active';
+      `);
+      this.db.exec('PRAGMA user_version = 2;');
+    }
   }
 
   /**

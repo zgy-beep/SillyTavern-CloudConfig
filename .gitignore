@@ -22,6 +22,9 @@ data/*.sqlite-*
 .env
 .env.local
 .env.*.local
+.server_secret
+data/.server_secret
+*.secret
 
 # Logs
 logs/

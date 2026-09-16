@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { AuthContext } from '../auth/AuthContext.js';
 import { P0ContentTypes, ContentTypeGroup, Permission } from '../../common/constants.js';
+import { ShareService } from '../services/ShareService.js';
+import { AuditService } from '../services/AuditService.js';
 
 /**
  * 创建 Express 路由
@@ -9,10 +11,21 @@ import { P0ContentTypes, ContentTypeGroup, Permission } from '../../common/const
  * @param {import('../services/ChangeEventBus.js').ChangeEventBus} context.changeBus
  * @param {import('../services/AuthorizationService.js').AuthorizationService} context.authService
  * @param {Map<string, import('../adapters/ConfigAdapter.js').ConfigAdapter>} context.adapters
+ * @param {import('../services/ShareService.js').ShareService} [context.shareService]
+ * @param {import('../services/AuditService.js').AuditService} [context.auditService]
  * @returns {Router}
  */
-export function createPluginRouter({ syncService, changeBus, authService, adapters }) {
+export function createPluginRouter({
+  syncService,
+  changeBus,
+  authService,
+  adapters,
+  shareService,
+  auditService,
+}) {
   const router = Router();
+  const audit = auditService || (syncService?.db ? new AuditService(syncService.db) : null);
+  const shares = shareService || (syncService?.db && audit ? new ShareService(syncService.db, audit) : null);
 
   // 统一错误包装辅助函数
   const asyncHandler = (fn) => (req, res, next) => {
@@ -60,7 +73,7 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
         WHERE owner_handle = :requester AND content_type = :ct AND is_deleted = 0
         UNION
         SELECT DISTINCT owner_handle FROM share_grants
-        WHERE (grantee_handle = :requester OR grantee_handle IS NULL)
+        WHERE (grantee_handle = :requester OR (is_public = 1 AND grantee_handle IS NULL))
           AND content_type = :ct
           AND content_type <> 'settings'
           AND status = 'active'
@@ -74,7 +87,7 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
         WHERE owner_handle = :requester AND is_deleted = 0
         UNION
         SELECT DISTINCT owner_handle FROM share_grants
-        WHERE (grantee_handle = :requester OR grantee_handle IS NULL)
+        WHERE (grantee_handle = :requester OR (is_public = 1 AND grantee_handle IS NULL))
           AND content_type <> 'settings'
           AND status = 'active'
           AND (expires_at IS NULL OR expires_at > :now)
@@ -129,7 +142,7 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
               AND EXISTS (
                 SELECT 1 FROM share_grants g
                 WHERE g.owner_handle = c.owner_handle
-                  AND (g.grantee_handle = :requester OR g.grantee_handle IS NULL)
+                  AND (g.grantee_handle = :requester OR (g.is_public = 1 AND g.grantee_handle IS NULL))
                   AND g.content_type = :ct
                   AND g.content_type <> 'settings'
                   AND g.status = 'active'
@@ -192,6 +205,17 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
         await adapter.apply(req.authContext.directories, itemUid, 'UPSERT', result.content, result.display_name);
       }
     }
+
+    audit?.log({
+      actor: req.authContext.handle,
+      action: 'pull',
+      target: owner,
+      contentType,
+      itemUid,
+      result: 'success',
+      details: { version: result.version },
+    });
+
     res.json(result);
   }));
 
@@ -226,6 +250,17 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
       checksum,
       payload,
       clientId,
+    });
+
+    audit?.log({
+      actor: req.authContext.handle,
+      action: operation === 'DELETE' ? 'delete' : 'push',
+      target: req.authContext.handle,
+      contentType,
+      itemUid,
+      result: 'success',
+      clientId,
+      details: { version: result.version, operation },
     });
 
     res.json({
@@ -283,14 +318,143 @@ export function createPluginRouter({ syncService, changeBus, authService, adapte
       clientId,
     });
 
+    audit?.log({
+      actor: req.authContext.handle,
+      action: 'rollback',
+      target: req.authContext.handle,
+      contentType,
+      itemUid,
+      result: 'success',
+      clientId,
+      details: { targetVersion, baseVersion },
+    });
+
     res.json({
       success: true,
       ...result,
     });
   }));
 
-  // 统一错误捕获处理（特别是 409 Conflict）
+  // 8. POST /shares/create-code
+  router.post('/shares/create-code', asyncHandler(async (req, res) => {
+    if (!shares) {
+      return res.status(503).json({ error: 'ServiceUnavailable', message: 'ShareService is not available' });
+    }
+    const {
+      content_type: contentType,
+      item_uid: itemUid,
+      scope_type: scopeType = 'ITEM',
+      code_usage: codeUsage = 'single_use',
+      max_uses: maxUses = 1,
+      expires_in_ms: expiresInMs,
+    } = req.body;
+
+    const result = shares.createShareCode(req.authContext, {
+      contentType,
+      itemUid,
+      scopeType,
+      codeUsage,
+      maxUses,
+      expiresInMs,
+    });
+    res.json(result);
+  }));
+
+  // 9. POST /shares/claim-code
+  router.post('/shares/claim-code', asyncHandler(async (req, res) => {
+    if (!shares) {
+      return res.status(503).json({ error: 'ServiceUnavailable', message: 'ShareService is not available' });
+    }
+    const { share_code: code, client_id: clientId } = req.body;
+    const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || req.socket?.remoteAddress;
+
+    const result = shares.claimShareCode(req.authContext, {
+      code,
+      ip,
+      clientId,
+    });
+    res.json(result);
+  }));
+
+  // 10. POST /shares/quick-public
+  router.post('/shares/quick-public', asyncHandler(async (req, res) => {
+    if (!shares) {
+      return res.status(503).json({ error: 'ServiceUnavailable', message: 'ShareService is not available' });
+    }
+    const {
+      content_type: contentType,
+      item_uid: itemUid,
+      scope_type: scopeType = 'ITEM',
+      enabled = true,
+    } = req.body;
+
+    const result = shares.setPublicShare(req.authContext, {
+      contentType,
+      itemUid,
+      scopeType,
+      enabled: enabled === true || enabled === 'true',
+    });
+    res.json(result);
+  }));
+
+  // 11. POST /shares/revoke
+  router.post('/shares/revoke', asyncHandler(async (req, res) => {
+    if (!shares) {
+      return res.status(503).json({ error: 'ServiceUnavailable', message: 'ShareService is not available' });
+    }
+    const { grant_id: grantId, share_code_hash: shareCodeHash } = req.body;
+    const result = shares.revokeShare(req.authContext, {
+      grantId,
+      shareCodeHash,
+    });
+    res.json(result);
+  }));
+
+  // 12. GET /shares/outgoing
+  router.get('/shares/outgoing', asyncHandler(async (req, res) => {
+    if (!shares) {
+      return res.status(503).json({ error: 'ServiceUnavailable', message: 'ShareService is not available' });
+    }
+    const list = shares.getOutgoingShares(req.authContext);
+    res.json({ shares: list });
+  }));
+
+  // 13. GET /shares/incoming
+  router.get('/shares/incoming', asyncHandler(async (req, res) => {
+    if (!shares) {
+      return res.status(503).json({ error: 'ServiceUnavailable', message: 'ShareService is not available' });
+    }
+    const list = shares.getIncomingShares(req.authContext);
+    res.json({ shares: list });
+  }));
+
+  // 14. GET /audit
+  router.get('/audit', asyncHandler(async (req, res) => {
+    if (!audit) {
+      return res.status(503).json({ error: 'ServiceUnavailable', message: 'AuditService is not available' });
+    }
+    const limit = Number(req.query.limit) || 50;
+    const since = Number(req.query.since) || 0;
+    const logs = audit.getLogs(req.authContext.handle, { limit, since });
+    res.json({ logs });
+  }));
+
+  // 统一错误捕获处理（特别是 409 Conflict 与 审计拒绝记录）
   router.use((err, req, res, next) => {
+    if (audit && (err.status === 403 || err.status === 429)) {
+      const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+      audit.log({
+        actor: req.authContext?.handle || 'anonymous',
+        action: req.path.replace(/^\//, '') || 'unknown',
+        target: req.query?.owner || req.body?.owner || null,
+        contentType: req.query?.content_type || req.body?.content_type || null,
+        itemUid: req.query?.item_uid || req.body?.item_uid || null,
+        result: 'denied',
+        ip,
+        details: err.message,
+      });
+    }
+
     if (err.name === 'ConflictError') {
       return res.status(409).json({
         error: 'Conflict',

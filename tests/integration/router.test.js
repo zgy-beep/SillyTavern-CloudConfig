@@ -214,8 +214,8 @@ test('Integration: Express Router Endpoints', async (t) => {
 
     // 2. 插入 bob 的 settings 公开/私有 share_grant (模拟异常或历史遗留授权)
     dbClient.prepare(`
-      INSERT INTO share_grants (owner_handle, grantee_handle, content_type, scope_type, grant_method, status, created_at)
-      VALUES ('bob', NULL, 'settings', 'CONTENT_TYPE', 'DIRECT', 'active', :now)
+      INSERT INTO share_grants (owner_handle, grantee_handle, content_type, scope_type, grant_method, status, is_public, created_at)
+      VALUES ('bob', NULL, 'settings', 'CONTENT_TYPE', 'DIRECT', 'active', 1, :now)
     `).run({ ':now': now });
 
     // 3. alice 视角验证：
@@ -245,8 +245,8 @@ test('Integration: Express Router Endpoints', async (t) => {
 
     // 4. 当 bob 授权了合法可共享类别 (如 openai_preset)
     dbClient.prepare(`
-      INSERT INTO share_grants (owner_handle, grantee_handle, content_type, scope_type, grant_method, status, created_at)
-      VALUES ('bob', NULL, 'openai_preset', 'CONTENT_TYPE', 'DIRECT', 'active', :now)
+      INSERT INTO share_grants (owner_handle, grantee_handle, content_type, scope_type, grant_method, status, is_public, created_at)
+      VALUES ('bob', NULL, 'openai_preset', 'CONTENT_TYPE', 'DIRECT', 'active', 1, :now)
     `).run({ ':now': now });
 
     // /owners (无参数) 现在应当列出 bob

@@ -24,7 +24,7 @@ export class ChangeEventBus {
             AND EXISTS (
               SELECT 1 FROM share_grants g
               WHERE g.owner_handle = e.owner_handle
-                AND (g.grantee_handle = :requester OR g.grantee_handle IS NULL)
+                AND (g.grantee_handle = :requester OR (g.is_public = 1 AND g.grantee_handle IS NULL))
                 AND g.content_type = e.content_type
                 AND g.content_type <> 'settings'
                 AND g.status = 'active'

@@ -27,6 +27,13 @@ export const AllP0ContentTypes = [
   'world',
 ];
 
+export const P1ContentTypes = [
+  'instruct',
+  'context',
+  'sysprompt',
+  'quick_replies',
+];
+
 /**
  * 跨账号禁止共享的敏感类别黑名单
  * settings 包含 API 密钥、密码等敏感信息，任何情况下禁止跨账号读取或共享

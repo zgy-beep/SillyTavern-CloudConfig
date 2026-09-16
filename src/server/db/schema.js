@@ -55,8 +55,24 @@ CREATE TABLE IF NOT EXISTS share_grants (
   share_code_hash TEXT,
   code_usage TEXT DEFAULT 'single_use',
   code_used INTEGER NOT NULL DEFAULT 0,
+  max_uses INTEGER NOT NULL DEFAULT 0,
+  is_public INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',
   expires_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  actor_handle TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_handle TEXT,
+  content_type TEXT,
+  item_uid TEXT,
+  result TEXT NOT NULL DEFAULT 'success',
+  client_instance_id TEXT,
+  ip TEXT,
+  details TEXT,
   created_at INTEGER NOT NULL
 );
 
@@ -64,4 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_change_events_seq ON change_events(seq);
 CREATE INDEX IF NOT EXISTS idx_change_events_owner ON change_events(owner_handle, seq);
 CREATE INDEX IF NOT EXISTS idx_config_versions_lookup ON config_versions(owner_handle, content_type, item_uid, version DESC);
 CREATE INDEX IF NOT EXISTS idx_share_grants_lookup ON share_grants(grantee_handle, owner_handle, content_type, status);
+CREATE INDEX IF NOT EXISTS idx_share_grants_code ON share_grants(share_code_hash);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor ON audit_logs(actor_handle, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_target ON audit_logs(target_handle, created_at DESC);
 `;

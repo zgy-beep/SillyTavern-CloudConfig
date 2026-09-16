@@ -16,7 +16,7 @@ export class AuthorizationService {
     this.stmtCheckGrant = this.db.prepare(`
       SELECT 1 FROM share_grants
       WHERE owner_handle = :owner
-        AND (grantee_handle = :grantee OR grantee_handle IS NULL)
+        AND (grantee_handle = :grantee OR (is_public = 1 AND grantee_handle IS NULL))
         AND content_type = :contentType
         AND content_type <> 'settings'
         AND status = 'active'

@@ -3,10 +3,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseClient } from './src/server/db/database.js';
 import { createP0Adapters } from './src/server/adapters/P0Adapters.js';
+import { createP1Adapters } from './src/server/adapters/P1Adapters.js';
 import { SnapshotStore } from './src/server/storage/SnapshotStore.js';
 import { AuthorizationService } from './src/server/services/AuthorizationService.js';
 import { ChangeEventBus } from './src/server/services/ChangeEventBus.js';
 import { SyncService } from './src/server/services/SyncService.js';
+import { AuditService } from './src/server/services/AuditService.js';
+import { ShareService } from './src/server/services/ShareService.js';
 import { createPluginRouter } from './src/server/routes/router.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,9 +38,15 @@ export async function init(router) {
 
   // 2. 初始化核心组件与适配器
   const adapters = createP0Adapters();
+  const p1Adapters = createP1Adapters();
+  for (const [key, adapter] of p1Adapters) {
+    adapters.set(key, adapter);
+  }
   const snapshotStore = new SnapshotStore();
   const authService = new AuthorizationService(dbClient);
   const changeBus = new ChangeEventBus(dbClient);
+  const auditService = new AuditService(dbClient);
+  const shareService = new ShareService(dbClient, auditService);
   const syncService = new SyncService(dbClient, adapters, snapshotStore, authService);
 
   // 3. 挂载前端扩展静态资源目录
@@ -50,6 +59,8 @@ export async function init(router) {
     changeBus,
     authService,
     adapters,
+    shareService,
+    auditService,
   });
   router.use('/', pluginRouter);
 

@@ -1,5 +1,6 @@
 import { SyncState, SyncMode } from '../../common/constants.js';
 import { showConflictDialog } from './conflictDialog.js';
+import { showClaimDialog, showShareDialog } from './shareDialog.js';
 
 /**
  * 渲染云同步配置主面板
@@ -49,6 +50,10 @@ export class CloudConfigPanel {
             <button id="cfgsync-refresh-btn" type="button" title="刷新配置状态" style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; margin:0; border-radius:4px; font-size:10px; color:#69c0ff; background:rgba(24,144,255,0.12); border:1px solid rgba(24,144,255,0.3); cursor:pointer; user-select:none;">
               <i class="fa-solid fa-rotate"></i>
             </button>
+            <button id="cfgsync-claim-btn" type="button" title="认领好友分享给你的配置邀请码" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 8px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#52c41a; background:rgba(82,196,26,0.12); border:1px solid rgba(82,196,26,0.3); cursor:pointer; user-select:none;">
+              <i class="fa-solid fa-key" style="font-size:10px;"></i>
+              <span>认领</span>
+            </button>
           </div>
           <span style="font-size:11.5px; opacity:0.75; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">账号: <strong class="cfgsync-account-label" style="color:#69c0ff;">${this.accountHandle}</strong></span>
         </div>
@@ -59,6 +64,22 @@ export class CloudConfigPanel {
 
     this.bindToggleAll();
     this.bindRefresh();
+    this.bindClaim();
+  }
+
+  bindClaim() {
+    const claimBtn = this.container.querySelector('#cfgsync-claim-btn');
+    if (!claimBtn || claimBtn.dataset.bound) return;
+    claimBtn.dataset.bound = 'true';
+
+    claimBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showClaimDialog({
+        api: this.api,
+        onClaimed: () => this.refresh(),
+      });
+    };
   }
 
   bindRefresh() {
@@ -521,6 +542,12 @@ export class CloudConfigPanel {
       pullBtn.style.opacity = cItem ? '0.9' : '0.35';
     }
 
+    const shareBtn = row.querySelector('.cfgsync-share-btn');
+    if (shareBtn) {
+      shareBtn.disabled = !cItem;
+      shareBtn.style.opacity = cItem ? '0.9' : '0.35';
+    }
+
     const toggle = row.querySelector('.cfgsync-toggle');
     if (toggle && toggle.checked !== isEnabled) {
       toggle.checked = isEnabled;
@@ -567,6 +594,11 @@ export class CloudConfigPanel {
         <button class="cfgsync-pull-btn menu_button" title="从云端拉取 (下载覆盖本地)" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; opacity:${item.cloudItem ? '0.9' : '0.35'};" ${!item.cloudItem ? 'disabled' : ''}>
           <i class="fa-solid fa-cloud-arrow-down"></i>
         </button>
+        ${contentType !== 'settings' ? `
+        <button class="cfgsync-share-btn menu_button" title="分享配置 (生成邀请码 / 设为公开)" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; opacity:${item.cloudItem ? '0.9' : '0.35'};" ${!item.cloudItem ? 'disabled' : ''}>
+          <i class="fa-solid fa-share-nodes"></i>
+        </button>
+        ` : ''}
       </div>
     `;
 
@@ -693,6 +725,22 @@ export class CloudConfigPanel {
         pullBtn.style.opacity = row._cloudItem ? '0.9' : '0.35';
       }
     };
+
+    // 分享配置（专属邀请码 / 全服公开）
+    const shareBtn = row.querySelector('.cfgsync-share-btn');
+    if (shareBtn) {
+      shareBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showShareDialog({
+          api: this.api,
+          contentType,
+          itemUid: item.itemUid,
+          displayName: item.displayName,
+          onUpdated: () => this.refresh(),
+        });
+      };
+    }
 
     return row;
   }
