@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseClient } from './src/server/db/database.js';
-import { createP0Adapters } from './src/server/adapters/P0Adapters.js';
+import { createP0Adapters, cleanupStraySecrets } from './src/server/adapters/P0Adapters.js';
 import { createP1Adapters } from './src/server/adapters/P1Adapters.js';
 import { SnapshotStore } from './src/server/storage/SnapshotStore.js';
 import { AuthorizationService } from './src/server/services/AuthorizationService.js';
@@ -67,9 +67,10 @@ export async function init(router) {
   });
   router.use('/', pluginRouter);
 
-  // 5. 启动时执行一次孤儿 Blob 清理，并注册周期定时器（每24小时）
+  // 5. 启动时自愈清理历史残留 user/secrets.json，并执行一次孤儿 Blob 清理（注册每24小时周期定时器）
   const runGc = async () => {
     try {
+      await cleanupStraySecrets();
       const activeRows = dbClient.prepare('SELECT blob_path FROM config_versions WHERE blob_path IS NOT NULL').all();
       const activePaths = new Set(activeRows.map(r => r.blob_path));
       // 遍历所有已记录的用户目录执行清理（在此记录的路径视为有效）

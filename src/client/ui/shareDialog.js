@@ -205,7 +205,7 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
         </div>
         <div style="font-size:11px; color:#d29922; margin-top:8px; line-height:1.4; display:flex; align-items:flex-start; gap:6px;">
           <i class="fa-solid fa-triangle-exclamation" style="margin-top:2px;"></i>
-          <span>提示：对方认领后拉取将下载独立本地副本，已拉取的副本无法追溯收回。</span>
+          <span>提示：对方认领后拉取将下载独立本地副本，已拉取的副本无法追溯收回；若勾选了共享 API Key，密钥将注入其账号目录且撤销授权不会回收。</span>
         </div>
       </div>
     </div>

@@ -195,6 +195,28 @@ export async function injectSecrets(sourceOwnerHandle, targetDirectories, audit 
 }
 
 /**
+ * 扫描指定 data 目录，自愈清理因旧版本写入在各账号 user/secrets.json 的历史残留文件 (R-1)
+ */
+export async function cleanupStraySecrets(dataDir = null) {
+  try {
+    const targetDataDir = dataDir || path.join(process.cwd(), 'data');
+    const exists = await fs.access(targetDataDir).then(() => true).catch(() => false);
+    if (!exists) return;
+    const entries = await fs.readdir(targetDataDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const strayPath = path.join(targetDataDir, entry.name, 'user', 'secrets.json');
+        try {
+          await fs.unlink(strayPath);
+        } catch {}
+      }
+    }
+  } catch (err) {
+    // 忽略自愈扫描中的次要异常
+  }
+}
+
+/**
  * Settings 适配器（单文件）
  */
 export class SettingsAdapter extends JsonConfigAdapter {

@@ -12,7 +12,7 @@ import { SyncService } from '../../src/server/services/SyncService.js';
 import { AuditService } from '../../src/server/services/AuditService.js';
 import { ShareService } from '../../src/server/services/ShareService.js';
 import { ConfigService } from '../../src/server/config/ConfigService.js';
-import { createP0Adapters, deepMergeSettings, autoBackupLocalFile, injectSecrets } from '../../src/server/adapters/P0Adapters.js';
+import { createP0Adapters, deepMergeSettings, autoBackupLocalFile, injectSecrets, cleanupStraySecrets } from '../../src/server/adapters/P0Adapters.js';
 import { createPluginRouter } from '../../src/server/routes/router.js';
 import { AuthContext } from '../../src/server/auth/AuthContext.js';
 import { makeItemUid } from '../../src/common/utils.js';
@@ -610,5 +610,16 @@ test('Integration: Phase 3 Home Settings Sharing & Direct Snapshot Upload (26 Ca
     // 验证 stray secrets.json 是否被防御性清理
     const strayStillExists = await fs.access(straySecretsPath).then(() => true).catch(() => false);
     assert.equal(strayStillExists, false, '误写在 user/ 目录下的残留 secrets.json 必须被自动清理');
+
+    // 验证 cleanupStraySecrets 全局自愈扫描 (R-1)
+    const davidRoot = path.join(tempDir, 'david');
+    const davidUserDir = path.join(davidRoot, 'user');
+    await fs.mkdir(davidUserDir, { recursive: true });
+    const davidStray = path.join(davidUserDir, 'secrets.json');
+    await fs.writeFile(davidStray, JSON.stringify({ stray: 'historical' }), 'utf-8');
+
+    await cleanupStraySecrets(tempDir);
+    const davidStrayExists = await fs.access(davidStray).then(() => true).catch(() => false);
+    assert.equal(davidStrayExists, false, '历史遗留在 user/secrets.json 的残留文件必须被全局扫描自愈清理');
   });
 });
