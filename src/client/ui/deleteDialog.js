@@ -32,7 +32,7 @@ export function showDeleteDialog({ displayName, contentType, itemUid, existsLoca
         </div>
         <div style="min-width:0; flex:1;">
           <div style="font-size:15px; font-weight:600; color:#f0f6fc; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">删除配置</div>
-          <div style="font-size:11.5px; color:#8b949e; line-height:1.3; margin-top:2px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${displayName}">${displayName}</div>
+          <div style="font-size:11.5px; color:#8b949e; line-height:1.3; margin-top:2px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${displayName}">${displayName}${!existsLocally ? ' (本地无文件 · 仅删云端)' : ''}</div>
         </div>
       </div>
       <button id="cfgsync-delete-close-x" type="button" style="width:26px; height:26px; border-radius:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#8b949e; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0; transition:all 0.15s ease;">&times;</button>
@@ -70,10 +70,17 @@ export function showDeleteDialog({ displayName, contentType, itemUid, existsLoca
           <i class="fa-solid fa-triangle-exclamation" style="color:#faad14; font-size:11px; margin-top:2px; flex-shrink:0;"></i>
           <span><strong>已认领副本说明</strong>：已分享并被其他账号认领的配置已落入其专属本地目录，无法被单方收回。</span>
         </div>
+        ${!existsLocally ? `
+        <div style="display:flex; align-items:flex-start; gap:6px; color:#58a6ff;">
+          <i class="fa-solid fa-circle-info" style="font-size:11px; margin-top:2px; flex-shrink:0;"></i>
+          <span><strong>本地状态</strong>：本地磁盘中未检索到此配置文件，本次操作将仅清理云端备份记录与墓碑。</span>
+        </div>
+        ` : `
         <div style="display:flex; align-items:flex-start; gap:6px;">
           <i class="fa-solid fa-lightbulb" style="color:#52c41a; font-size:11px; margin-top:2px; flex-shrink:0;"></i>
           <span><strong>提示</strong>：若删除了本地文件，建议刷新页面或重启酒馆以清除内存中的缓存对象。</span>
         </div>
+        `}
       </div>
     </div>
 
@@ -81,7 +88,7 @@ export function showDeleteDialog({ displayName, contentType, itemUid, existsLoca
       <button id="cfgsync-delete-cancel-btn" type="button" style="padding:7px 16px; border-radius:6px; font-size:12.5px; font-weight:500; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); color:#c9d1d9; cursor:pointer; transition:all 0.15s ease;">取消</button>
       <button id="cfgsync-delete-confirm-btn" type="button" style="display:inline-flex; align-items:center; gap:6px; padding:7px 20px; border-radius:6px; font-size:12.5px; font-weight:600; background:#da3633; border:1px solid rgba(255,255,255,0.12); color:#ffffff; cursor:pointer; transition:all 0.15s ease; box-shadow:0 1px 4px rgba(0,0,0,0.3);">
         <i class="fa-solid fa-trash-can"></i>
-        <span>确认删除</span>
+        <span>${!existsLocally ? '确认删除云端记录' : '确认删除'}</span>
       </button>
     </div>
   `;

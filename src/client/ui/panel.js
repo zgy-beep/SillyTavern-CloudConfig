@@ -956,7 +956,7 @@ export class CloudConfigPanel {
           itemUid: item.itemUid,
           existsLocally: row._existsLocally,
           onConfirm: async ({ deleteCloud, deleteLocal }) => {
-            await this.api.deleteItem({
+            const res = await this.api.deleteItem({
               contentType,
               itemUid: item.itemUid,
               deleteCloud,
@@ -966,6 +966,10 @@ export class CloudConfigPanel {
             const bindingUid = this.storage.makeBindingUid(this.accountHandle, sourceOwner, contentType, item.itemUid);
             await this.storage.deleteBinding(bindingUid).catch(() => {});
             await this.refresh();
+
+            if (deleteLocal && res?.deleted_local === false && res?.local_reason === 'local_file_not_found') {
+              alert('【删除提示】\n\n本地未找到该配置文件，已仅删除云端备份记录。');
+            }
           },
         });
       };

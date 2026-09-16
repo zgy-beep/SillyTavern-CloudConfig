@@ -459,7 +459,15 @@ export function createPluginRouter({
 
   // 10.5 GET /config & POST /config
   router.get('/config', (req, res) => {
-    res.json({ config: configService?.getAll() || {} });
+    const isAdmin = Boolean(
+      req.user?.profile?.admin === true ||
+      req.authContext?.rawProfile?.admin === true ||
+      req.authContext?.isAdmin === true
+    );
+    res.json({
+      config: configService?.getAll() || {},
+      is_admin: isAdmin,
+    });
   });
 
   router.post('/config', (req, res) => {
@@ -491,39 +499,49 @@ export function createPluginRouter({
       return res.status(400).json({ error: 'BadRequest', message: 'content_type and item_uid are required' });
     }
 
-    const requesterHandle = req.authContext.handle;
-    const ownerHandle = owner || requesterHandle;
+    const requester = req.authContext.handle;
+    const targetOwner = owner || requester;
 
-    // 若锁定的是他人的共享配置，需验证当前请求者拥有该配置的合法读取授权
-    if (ownerHandle !== requesterHandle) {
-      const validatedGrant = authService.getApprovedGrant(ownerHandle, requesterHandle, contentType, itemUid);
+    // 跨账号校验：若锁定他人分享给自己的配置，必须已获得合法 read 授权
+    if (targetOwner !== requester) {
+      const validatedGrant = authService ? authService.getApprovedGrant(targetOwner, requester, contentType, itemUid) : null;
       if (!validatedGrant) {
-        return res.status(403).json({ error: 'ForbiddenError', message: 'No access to specified owner configuration' });
+        return res.status(403).json({
+          error: 'ForbiddenError',
+          message: 'No access to specified owner configuration',
+        });
       }
     }
 
-    const isLocked = locked === true || locked === 'true' || locked === 1 || locked === '1';
+    const isLocked = locked === true || locked === 'true';
     syncService.setLock({
-      requesterHandle,
-      ownerHandle,
+      requesterHandle: requester,
+      ownerHandle: targetOwner,
       contentType,
       itemUid,
       locked: isLocked,
     });
 
+    // 审计日志
     audit?.log({
-      actor: requesterHandle,
+      actor: requester,
       action: isLocked ? 'lock' : 'unlock',
-      target: ownerHandle,
+      target: targetOwner,
       contentType,
       itemUid,
       result: 'success',
     });
 
-    res.json({ success: true, is_locked: isLocked ? 1 : 0 });
+    res.json({
+      success: true,
+      content_type: contentType,
+      item_uid: itemUid,
+      owner: targetOwner,
+      is_locked: isLocked ? 1 : 0,
+    });
   }));
 
-  // 10.7 DELETE /items (手动删除配置，含安全防护与备份，G-2 / N-4 / N-6)
+  // 10.7 DELETE /items (手动删除配置文件，G-2 / N-4 / N-6, BUG-P4-01)
   router.delete('/items', asyncHandler(async (req, res) => {
     const {
       content_type: contentType,
@@ -553,26 +571,44 @@ export function createPluginRouter({
     }
 
     let backedUp = false;
-    // 1. 删除本地文件（需执行安全备份）
-    if (shouldDeleteLocal) {
-      try {
-        let localFilePath = null;
-        if (typeof adapter.getFilePath === 'function') {
-          localFilePath = await adapter.getFilePath(req.authContext.directories, itemUid);
-        }
-        if (localFilePath) {
-          const { autoBackupLocalFile } = await import('../adapters/P0Adapters.js');
-          await autoBackupLocalFile(localFilePath);
-          backedUp = true;
-        }
-      } catch (backupErr) {
-        console.warn('[cfgsync] autoBackupLocalFile failed during delete:', backupErr.message);
-      }
+    let localDeleted = false;
+    let localReason = null;
 
-      await adapter.apply(req.authContext.directories, itemUid, 'DELETE', null, null, {
-        sourceOwner: req.authContext.handle,
-        audit,
-      });
+    // 1. 删除本地文件（需执行安全备份，如实报告执行结果与原因）
+    if (shouldDeleteLocal) {
+      const localFilePath = (typeof adapter.getFilePath === 'function')
+        ? await adapter.getFilePath(req.authContext.directories, itemUid)
+        : null;
+
+      if (!localFilePath) {
+        localReason = 'local_file_not_found';
+      } else {
+        const fs = await import('node:fs/promises');
+        const fileExists = await fs.access(localFilePath).then(() => true).catch(() => false);
+        if (!fileExists) {
+          localReason = 'local_file_not_found';
+        } else {
+          try {
+            const { autoBackupLocalFile } = await import('../adapters/P0Adapters.js');
+            await autoBackupLocalFile(localFilePath);
+            backedUp = true;
+
+            await adapter.apply(req.authContext.directories, itemUid, 'DELETE', null, null, {
+              sourceOwner: req.authContext.handle,
+              audit,
+            });
+
+            const stillExists = await fs.access(localFilePath).then(() => true).catch(() => false);
+            localDeleted = !stillExists;
+            if (!localDeleted) {
+              localReason = 'delete_failed';
+            }
+          } catch (delErr) {
+            localReason = 'delete_error:' + delErr.message;
+            console.warn('[cfgsync] Local file delete failed:', delErr.message);
+          }
+        }
+      }
     }
 
     // 2. 删除云端备份（软删除 + 墓碑记录）
@@ -598,13 +634,19 @@ export function createPluginRouter({
       contentType,
       itemUid,
       result: 'success',
-      details: { delete_cloud: shouldDeleteCloud, delete_local: shouldDeleteLocal, backed_up: backedUp },
+      details: {
+        delete_cloud: shouldDeleteCloud,
+        delete_local: localDeleted,
+        local_reason: localReason,
+        backed_up: backedUp,
+      },
     });
 
     res.json({
       success: true,
       deleted_cloud: shouldDeleteCloud,
-      deleted_local: shouldDeleteLocal,
+      deleted_local: localDeleted,
+      local_reason: localReason,
     });
   }));
 

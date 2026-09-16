@@ -382,6 +382,11 @@ test('Integration: Phase 4 Visuals, Pruning, Delete & Server-Side Lock Protectio
       }),
     });
     assert.equal(deleteRes.status, 200);
+    const deleteData = await deleteRes.json();
+    assert.equal(deleteData.success, true);
+    assert.equal(deleteData.deleted_cloud, true);
+    assert.equal(deleteData.deleted_local, true);
+    assert.equal(deleteData.local_reason, null);
 
     // Local original file is deleted
     assert.ok(!fsSync.existsSync(presetLocalPath));
@@ -585,5 +590,59 @@ test('Integration: Phase 4 Visuals, Pruning, Delete & Server-Side Lock Protectio
     assert.equal(adminConfigRes.status, 200);
     const adminConfigData = await adminConfigRes.json();
     assert.equal(adminConfigData.config.maxVersions, 50);
+
+    // GET /config returns is_admin
+    const adminGetRes = await fetch(`${baseUrl}/config`);
+    assert.equal(adminGetRes.status, 200);
+    const adminGetData = await adminGetRes.json();
+    assert.equal(adminGetData.is_admin, true);
+  });
+
+  // TC17 (BUG-P4-01): When local file does not exist, DELETE /items returns deleted_local: false and local_reason: 'local_file_not_found'
+  await t.test('TC17: DELETE /items when local file does not exist returns deleted_local: false and local_reason: local_file_not_found', async () => {
+    currentUser = 'alice';
+    currentUserDir = aliceDir;
+
+    const ghostUid = makeItemUid('openai_preset', 'Ghost_Preset_Never_Existed.json');
+
+    // First push to cloud so cloud has it
+    const pushRes = await fetch(`${baseUrl}/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'openai_preset',
+        item_uid: ghostUid,
+        payload: { temp: 0.5, name: 'Ghost_Preset' },
+        force: true,
+      }),
+    });
+    assert.equal(pushRes.status, 200);
+
+    // Verify local file does NOT exist
+    const ghostLocalPath = path.join(alicePresetsDir, 'Ghost_Preset_Never_Existed.json');
+    assert.ok(!fsSync.existsSync(ghostLocalPath));
+
+    // Call DELETE with delete_local = true
+    const deleteRes = await fetch(`${baseUrl}/items`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'openai_preset',
+        item_uid: ghostUid,
+        delete_cloud: true,
+        delete_local: true,
+      }),
+    });
+    assert.equal(deleteRes.status, 200);
+    const deleteData = await deleteRes.json();
+
+    assert.equal(deleteData.success, true);
+    assert.equal(deleteData.deleted_cloud, true);
+    assert.equal(deleteData.deleted_local, false, 'deleted_local must be false when local file is missing');
+    assert.equal(deleteData.local_reason, 'local_file_not_found');
+
+    // Cloud record is indeed deleted (tombstone)
+    const pullRes = await fetch(`${baseUrl}/pull?content_type=openai_preset&item_uid=${ghostUid}`);
+    assert.equal(pullRes.status, 404);
   });
 });
