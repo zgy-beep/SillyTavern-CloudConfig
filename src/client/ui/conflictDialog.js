@@ -17,10 +17,11 @@ export function showConflictDialog({
   const modal = document.createElement('div');
   modal.className = 'cfgsync-modal';
   modal.style.cssText = `
-    background: var(--SmartThemeBodyColor, #20232a);
-    color: var(--SmartThemeQuoteColor, #f0f0f0);
-    padding: 24px; border-radius: 10px; max-width: 420px; width: 90%;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.6); border: 1px solid rgba(255, 77, 79, 0.5);
+    background: #1c202a !important;
+    color: #e6edf3 !important;
+    padding: 24px; border-radius: 12px; max-width: 420px; width: 90%;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.75), 0 0 0 1px rgba(255, 77, 79, 0.4);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   `;
 
   // 强制覆盖 menu_button 的共用按钮样式，避免被酒馆 CSS 压缩按钮宽度
