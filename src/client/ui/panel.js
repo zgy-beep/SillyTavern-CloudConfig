@@ -20,6 +20,7 @@ export class CloudConfigPanel {
     this.accountHandle = accountHandle;
     this.onAccountChange = onAccountChange;
     this.container = null;
+    this._refreshing = false;
   }
 
   render(targetEl) {
@@ -99,6 +100,8 @@ export class CloudConfigPanel {
    */
   async refresh() {
     if (!this.container) return;
+    if (this._refreshing) return;
+    this._refreshing = true;
     this.ensureShell();
 
     const treeEl = this.container.querySelector('#cfgsync-items-tree');
@@ -189,6 +192,8 @@ export class CloudConfigPanel {
       } else {
         console.warn('[cfgsync] Refresh error:', err.message);
       }
+    } finally {
+      this._refreshing = false;
     }
   }
 
@@ -284,12 +289,12 @@ export class CloudConfigPanel {
     if (!itemsContainer) return;
 
     if (items.length === 0) {
-      itemsContainer.innerHTML = `<div style="font-size:12px; opacity:0.6; padding: 6px 4px;">（暂无可用配置）</div>`;
+      itemsContainer.innerHTML = `<div class="cfgsync-empty-notice" style="font-size:12px; opacity:0.6; padding: 6px 4px;">（暂无可用配置）</div>`;
       return;
     }
 
-    const emptyNotice = itemsContainer.querySelector('div:not(.cfgsync-item-row)');
-    if (emptyNotice && itemsContainer.children.length === 1) {
+    const emptyNotice = itemsContainer.querySelector('.cfgsync-empty-notice');
+    if (emptyNotice) {
       emptyNotice.remove();
     }
 
@@ -315,25 +320,117 @@ export class CloudConfigPanel {
     }
   }
 
-  renderBadgeHtml(state, version, cloudItem = null, binding = null) {
+  /**
+   * 获取同步状态的颜色与文字描述
+   */
+  getStateInfo(state, version, cloudItem = null, binding = null) {
     if (binding && binding.enabled && state === SyncState.SYNCED) {
       if (cloudItem && cloudItem.current_version > (binding.last_synced_version || 0)) {
-        return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#faad14; color:#000; font-weight:600; white-space:nowrap;">☁️ 云端新版 (v${cloudItem.current_version})</span>`;
+        return { color: '#faad14', label: `☁️ 云端新版 v${cloudItem.current_version}` };
       }
       const vText = version ? `v${version}` : '本地版';
       const fromText = (binding.source_owner_handle && binding.source_owner_handle !== this.accountHandle) ? ` · ${binding.source_owner_handle}` : '';
-      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#52c41a; color:#fff; white-space:nowrap;">已同步 (${vText}${fromText})</span>`;
+      return { color: '#52c41a', label: `已同步 (${vText}${fromText})` };
     }
     if (state === SyncState.CONFLICT) {
-      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#f5222d; color:#fff; white-space:nowrap;">⚠️ 冲突</span>`;
+      return { color: '#f5222d', label: '⚠️ 冲突' };
     }
     if (state === SyncState.BACKUP_CREATED) {
-      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#1890ff; color:#fff; white-space:nowrap;">冷备份就绪</span>`;
+      return { color: '#1890ff', label: '冷备份就绪' };
     }
     if (cloudItem) {
-      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#722ed1; color:#fff; font-weight:500; white-space:nowrap;">云端就绪 (v${cloudItem.current_version} · ${cloudItem.owner_handle})</span>`;
+      return { color: '#722ed1', label: `云端就绪 (v${cloudItem.current_version} · ${cloudItem.owner_handle})` };
     }
-    return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:#555; color:#fff; white-space:nowrap;">未同步</span>`;
+    return { color: '#555', label: '未同步' };
+  }
+
+  /**
+   * 将毫秒时间戳格式化为相对时间（如 "2分钟前"、"昨天"）
+   */
+  formatRelativeTime(timestampMs) {
+    const now = Date.now();
+    const diff = now - timestampMs;
+    const seconds = Math.floor(diff / 1000);
+    if (seconds < 60) return '刚刚';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}分钟前`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}小时前`;
+    const days = Math.floor(hours / 24);
+    if (days === 1) return '昨天';
+    if (days < 30) return `${days}天前`;
+    const months = Math.floor(days / 30);
+    if (months < 12) return `${months}个月前`;
+    return `${Math.floor(months / 12)}年前`;
+  }
+
+  /**
+   * 为指定行渲染版本选择器的初始 HTML
+   * @returns {string} select 或 badge 的 HTML
+   */
+  renderVersionSelectorHtml(state, version, cloudItem = null, binding = null) {
+    const info = this.getStateInfo(state, version, cloudItem, binding);
+
+    // 云端没有任何版本时，显示静态徽章
+    if (!cloudItem) {
+      return `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:${info.color}; color:#fff; white-space:nowrap;">${info.label}</span>`;
+    }
+
+    // 有云端版本时，显示下拉选择器（初始仅显示当前版本，懒加载完整列表）
+    const ownerText = cloudItem.owner_handle || '';
+    const currentV = cloudItem.current_version || 1;
+    return `<select class="cfgsync-version-select" style="font-size:11px; padding:2px 4px; border-radius:3px; border:2px solid ${info.color}; background:rgba(0,0,0,0.3); color:#fff; cursor:pointer; max-width:180px; outline:none; appearance:auto; -webkit-appearance:menulist;">
+      <option value="${currentV}" selected>v${currentV} · 最新 · ${ownerText}</option>
+    </select>`;
+  }
+
+  /**
+   * 懒加载版本历史到下拉选择器
+   */
+  async loadVersionOptions(row) {
+    if (row._versionsLoaded) return;
+    const cloudItem = row._cloudItem;
+    if (!cloudItem) return;
+
+    const contentType = row.dataset.contentType;
+    const itemUid = row.dataset.itemUid;
+    const owner = cloudItem.owner_handle || this.accountHandle;
+
+    try {
+      const res = await this.api.getVersions(contentType, itemUid, owner);
+      const versions = res.versions || [];
+      if (versions.length === 0) return;
+
+      const select = row.querySelector('.cfgsync-version-select');
+      if (!select) return;
+
+      const currentSelected = select.value;
+
+      select.innerHTML = '';
+      for (let i = 0; i < versions.length; i++) {
+        const v = versions[i];
+        if (v.operation === 'DELETE') continue;
+        const isLatest = i === 0;
+        const timeText = v.created_at ? this.formatRelativeTime(v.created_at) : '';
+        const label = isLatest
+          ? `v${v.version} · 最新 · ${owner} · ${timeText}`
+          : `v${v.version} · ${owner} · ${timeText}`;
+        const opt = document.createElement('option');
+        opt.value = String(v.version);
+        opt.textContent = label;
+        if (String(v.version) === currentSelected) opt.selected = true;
+        select.appendChild(opt);
+      }
+
+      // 如果之前选中的版本已不存在，默认选中最新
+      if (!select.querySelector(`option[value="${currentSelected}"]`)) {
+        select.selectedIndex = 0;
+      }
+
+      row._versionsLoaded = true;
+    } catch (err) {
+      console.warn('[cfgsync] Failed to load version history:', err.message);
+    }
   }
 
   updateRowState(row, binding, cloudItem = null, existsLocally = true) {
@@ -345,10 +442,26 @@ export class CloudConfigPanel {
     const isEnabled = Boolean(binding?.enabled);
     const state = binding?.state || (cItem ? 'CLOUD_AVAILABLE' : SyncState.DISABLED);
     const version = binding?.last_synced_version || cItem?.current_version;
+    const info = this.getStateInfo(state, version, cItem, binding);
 
     const badgeContainer = row.querySelector('.cfgsync-state-badge-container');
     if (badgeContainer) {
-      badgeContainer.innerHTML = this.renderBadgeHtml(state, version, cItem, binding);
+      const select = badgeContainer.querySelector('.cfgsync-version-select');
+      if (select) {
+        // 有版本选择器时，仅更新边框颜色
+        select.style.borderColor = info.color;
+      } else if (cItem) {
+        // 云端有数据但选择器还没创建（可能状态变化后出现了 cloudItem），用选择器替换 badge
+        badgeContainer.innerHTML = this.renderVersionSelectorHtml(state, version, cItem, binding);
+        const newSelect = badgeContainer.querySelector('.cfgsync-version-select');
+        if (newSelect) {
+          newSelect.addEventListener('focus', () => this.loadVersionOptions(row), { once: true });
+          newSelect.addEventListener('mousedown', () => this.loadVersionOptions(row), { once: true });
+        }
+      } else {
+        // 没有云端数据，显示静态 badge
+        badgeContainer.innerHTML = `<span class="cfgsync-state-badge" style="font-size:11px; padding:2px 6px; border-radius:3px; background:${info.color}; color:#fff; white-space:nowrap;">${info.label}</span>`;
+      }
     }
 
     const pushBtn = row.querySelector('.cfgsync-push-btn');
@@ -396,12 +509,19 @@ export class CloudConfigPanel {
       </div>
       <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
         <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center;">
-          ${this.renderBadgeHtml(state, version, item.cloudItem, initialBinding)}
+          ${this.renderVersionSelectorHtml(state, version, item.cloudItem, initialBinding)}
         </div>
         <button class="cfgsync-push-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${(!row._existsLocally || !isEnabled) ? 'disabled' : ''}>推云端</button>
         <button class="cfgsync-pull-btn menu_button" style="white-space:nowrap !important; width:auto !important; min-width:unset !important; padding:4px 8px !important; font-size:11px !important; line-height:1.2 !important; cursor:pointer;" ${(!item.cloudItem && !isEnabled) ? 'disabled' : ''}>拉云端</button>
       </div>
     `;
+
+    // 为版本选择器绑定懒加载事件
+    const versionSelect = row.querySelector('.cfgsync-version-select');
+    if (versionSelect) {
+      versionSelect.addEventListener('focus', () => this.loadVersionOptions(row), { once: true });
+      versionSelect.addEventListener('mousedown', () => this.loadVersionOptions(row), { once: true });
+    }
 
     // 勾选切换开关
     const toggle = row.querySelector('.cfgsync-toggle');
@@ -456,11 +576,13 @@ export class CloudConfigPanel {
             serverVersion: res.serverVersion,
             onResolve: async (choice) => {
               await this.syncManager.resolveConflict(row._binding, choice, localPayload);
+              row._versionsLoaded = false; // 推送后刷新版本列表
               this.updateRowState(row, row._binding, row._cloudItem, true);
             },
           });
         } else {
           row._existsLocally = true;
+          row._versionsLoaded = false; // 推送后刷新版本列表
           this.updateRowState(row, row._binding, row._cloudItem, true);
         }
       } catch (e) {
@@ -471,7 +593,7 @@ export class CloudConfigPanel {
       }
     };
 
-    // 手动从云端拉取（支持跨账号从任意云端备份拉取并写入本地）
+    // 手动从云端拉取（支持跨账号从任意云端备份拉取并写入本地，支持选择历史版本）
     const pullBtn = row.querySelector('.cfgsync-pull-btn');
     pullBtn.onclick = async () => {
       if (!row._binding) {
@@ -482,7 +604,12 @@ export class CloudConfigPanel {
       const origText = pullBtn.textContent;
       pullBtn.textContent = '拉取中...';
       try {
-        const res = await this.syncManager.pullCloud(row._binding);
+        // 从版本下拉选择器读取用户选中的目标版本
+        const versionSelect = row.querySelector('.cfgsync-version-select');
+        const selectedVersion = versionSelect ? Number(versionSelect.value) : null;
+        const versionLabel = selectedVersion ? `v${selectedVersion}` : '最新版';
+
+        const res = await this.syncManager.pullCloud(row._binding, null, selectedVersion);
         row._existsLocally = true;
         this.updateRowState(row, row._binding, row._cloudItem, true);
 
@@ -499,7 +626,7 @@ export class CloudConfigPanel {
         }
 
         const shouldReload = confirm(
-          `拉取成功！已将【${item.displayName}】同步并保存到当前账号（${this.accountHandle}）的本地目录中。\n\n是否立即刷新页面让酒馆完整应用新配置？`
+          `拉取成功！已将【${item.displayName}】的 ${versionLabel} 同步并保存到当前账号（${this.accountHandle}）的本地目录中。\n\n是否立即刷新页面让酒馆完整应用新配置？`
         );
         if (shouldReload) {
           window.location.reload();

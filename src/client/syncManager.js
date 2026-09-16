@@ -119,12 +119,12 @@ export class ClientSyncManager {
   /**
    * 从云端拉取配置并覆盖本地
    */
-  async pullCloud(binding, applyLocalCb = null) {
+  async pullCloud(binding, applyLocalCb = null, targetVersion = null) {
     const res = await this.api.pull(
       binding.content_type,
       binding.item_uid,
       binding.source_owner_handle || '',
-      null,
+      targetVersion,
       true
     );
 
