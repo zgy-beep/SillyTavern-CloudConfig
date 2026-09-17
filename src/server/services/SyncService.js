@@ -1,5 +1,8 @@
 import { OperationType, Permission, DEFAULT_MAX_VERSIONS } from '../../common/constants.js';
 import { calcJsonChecksum, sha256 } from '../../common/utils.js';
+import { DiskGuard, InsufficientStorageError } from '../utils/DiskGuard.js';
+
+export { InsufficientStorageError };
 
 export class ConflictError extends Error {
   constructor(message, serverVersion, currentChecksum, isDeleted = false) {
@@ -47,7 +50,7 @@ export class SyncService {
    * @param {import('./AuthorizationService.js').AuthorizationService} authService
    * @param {number} [maxVersions]
    */
-  constructor(dbClient, adapters, snapshotStore, authService, configService = null, maxVersions = DEFAULT_MAX_VERSIONS) {
+  constructor(dbClient, adapters, snapshotStore, authService, configService = null, maxVersions = DEFAULT_MAX_VERSIONS, storageMirror = null) {
     if (configService && typeof configService === 'number') {
       maxVersions = configService;
       configService = null;
@@ -58,6 +61,8 @@ export class SyncService {
     this.auth = authService;
     this.configService = configService;
     this.maxVersions = maxVersions;
+    this.storageMirror = storageMirror;
+    this.mockAvailableBytes = null; // 供测试注入模拟可用字节数
 
     this.prepareStatements();
   }
@@ -283,6 +288,11 @@ export class SyncService {
 
     const sizeBytes = serialized ? serialized.buffer.length : 0;
 
+    // N-9, #10, #24: 动态磁盘余量守卫 (Threshold = max(50MB, sizeBytes * 3))
+    if (operation === OperationType.UPSERT) {
+      DiskGuard.checkSpace(this.dataRoot || process.cwd(), sizeBytes, this.mockAvailableBytes);
+    }
+
     // 判断是否采用直推模式
     const isForce = force !== null && force !== undefined
       ? Boolean(force)
@@ -422,6 +432,13 @@ export class SyncService {
       // 事务提交后，原子重命名临时 blob 为正式 blob
       if (tempBlobInfo) {
         await this.store.commitBlob(tempBlobInfo.tmpPath, tempBlobInfo.targetPath);
+        // N-3, #9, #18: 异步镜像至 LocalPath 与 WebDAV 外部驱动
+        if (this.storageMirror && serialized?.buffer) {
+          const relPath = `blobs/${ownerHandle}/${contentType}/${itemUid}/v${committedVersion}.${serialized.ext || 'bin'}`;
+          this.storageMirror.mirrorBlob(relPath, serialized.buffer).catch(err => {
+            console.warn('[cfgsync:mirror] Background mirror warning:', err.message);
+          });
+        }
       }
 
       txSuccess = true;

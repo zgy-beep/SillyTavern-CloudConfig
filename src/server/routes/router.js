@@ -5,6 +5,8 @@ import { ShareService } from '../services/ShareService.js';
 import { AuditService } from '../services/AuditService.js';
 import { SseService } from '../services/SseService.js';
 import { DiagnosticService } from '../services/DiagnosticService.js';
+import { DisasterRecoveryService } from '../services/DisasterRecoveryService.js';
+import { StorageMirrorService } from '../services/StorageMirrorService.js';
 
 /**
  * 创建 Express 路由
@@ -28,11 +30,19 @@ export function createPluginRouter({
   configService,
   sseService,
   diagnosticService,
+  disasterRecoveryService,
+  storageMirrorService,
+  schedulerService,
 }) {
   const router = Router();
   const audit = auditService || (syncService?.db ? new AuditService(syncService.db) : null);
   const shares = shareService || (syncService?.db && audit ? new ShareService(syncService.db, audit, configService) : null);
   const sse = sseService || new SseService({ changeBus, authService, configService });
+  const drService = disasterRecoveryService || (syncService?.db && syncService?.store ? new DisasterRecoveryService({
+    dbClient: syncService.db,
+    snapshotStore: syncService.store,
+    auditService: audit,
+  }) : null);
   router.sseService = sse;
 
   // 统一错误包装辅助函数
@@ -847,7 +857,50 @@ export function createPluginRouter({
     res.json(report);
   }));
 
-  // 统一错误捕获处理（特别是 409 Conflict 与 审计拒绝记录）
+  // 17. GET /backup/export (#7 流式灾备导出)
+  router.get('/backup/export', asyncHandler(async (req, res) => {
+    if (!drService) {
+      return res.status(503).json({ error: 'ServiceUnavailable', message: 'Disaster recovery service unavailable' });
+    }
+    const requester = req.authContext.handle;
+    const result = await drService.exportBackup(requester);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${result.fileName}"`);
+    res.send(result.buffer);
+  }));
+
+  // 18. POST /backup/import (#8 灾备安全导入，零静默覆盖)
+  router.post('/backup/import', asyncHandler(async (req, res) => {
+    if (!drService) {
+      return res.status(503).json({ error: 'ServiceUnavailable', message: 'Disaster recovery service unavailable' });
+    }
+    const requester = req.authContext.handle;
+    let zipBuffer = null;
+    if (Buffer.isBuffer(req.body)) {
+      zipBuffer = req.body;
+    } else if (req.body?.buffer) {
+      zipBuffer = Buffer.isBuffer(req.body.buffer) ? req.body.buffer : Buffer.from(req.body.buffer);
+    } else if (typeof req.body === 'string') {
+      zipBuffer = Buffer.from(req.body, 'base64');
+    } else {
+      return res.status(400).json({ error: 'BadRequest', message: 'ZIP body is required for import' });
+    }
+
+    const importRes = await drService.importBackup(zipBuffer, requester, req.authContext.directories);
+    res.json(importRes);
+  }));
+
+  // 19. GET /storage/health (外部存储驱动健康检查与三态诊断，#9, #18)
+  router.get('/storage/health', asyncHandler(async (req, res) => {
+    const mirror = storageMirrorService || syncService?.storageMirror;
+    if (!mirror) {
+      return res.json({ healthy: true, local: { enabled: false }, webdav: { enabled: false } });
+    }
+    const health = await mirror.checkHealth();
+    res.json(health);
+  }));
+
+  // 统一错误捕获处理（特别是 409 Conflict、507 Insufficient Storage 与 审计拒绝记录）
   router.use((err, req, res, next) => {
     if (audit && (err.status === 403 || err.status === 429)) {
       const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
@@ -860,6 +913,17 @@ export function createPluginRouter({
         result: 'denied',
         ip,
         details: err.message,
+      });
+    }
+
+    // N-9, #10, #24: 动态磁盘余量不足 507
+    if (err.name === 'InsufficientStorageError' || err.status === 507) {
+      return res.status(507).json({
+        error: 'InsufficientStorageError',
+        code: 'INSUFFICIENT_STORAGE',
+        message: err.message,
+        availableBytes: err.availableBytes,
+        requiredBytes: err.requiredBytes,
       });
     }
 

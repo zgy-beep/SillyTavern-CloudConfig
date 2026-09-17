@@ -15,6 +15,9 @@ import { ConfigService } from './src/server/config/ConfigService.js';
 import { SseService } from './src/server/services/SseService.js';
 import { MigrationService } from './src/server/services/MigrationService.js';
 import { DiagnosticService } from './src/server/services/DiagnosticService.js';
+import { StorageMirrorService } from './src/server/services/StorageMirrorService.js';
+import { DisasterRecoveryService } from './src/server/services/DisasterRecoveryService.js';
+import { SchedulerService } from './src/server/services/SchedulerService.js';
 import { createPluginRouter } from './src/server/routes/router.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -29,6 +32,7 @@ export const info = {
 
 let dbClient = null;
 let gcInterval = null;
+let schedulerService = null;
 
 /**
  * SillyTavern 插件初始化入口
@@ -62,7 +66,9 @@ export async function init(router) {
   const changeBus = new ChangeEventBus(dbClient, configService);
   const auditService = new AuditService(dbClient);
   const shareService = new ShareService(dbClient, auditService, configService, { dataRoot });
-  const syncService = new SyncService(dbClient, adapters, snapshotStore, authService, configService);
+  const storageMirrorService = new StorageMirrorService({ configService });
+  const disasterRecoveryService = new DisasterRecoveryService({ dbClient, snapshotStore, auditService });
+  const syncService = new SyncService(dbClient, adapters, snapshotStore, authService, configService, undefined, storageMirrorService);
   syncService.dataRoot = dataRoot;
 
   const sseService = new SseService({ changeBus, authService, configService });
@@ -72,6 +78,20 @@ export async function init(router) {
     stRoot: process.cwd(),
     activeDataRoot: dataRoot,
   });
+
+  schedulerService = new SchedulerService({
+    configService,
+    auditService,
+    backupFn: async (reason) => {
+      const exportResult = await disasterRecoveryService.exportBackup();
+      if (storageMirrorService) {
+        const dateStr = new Date().toISOString().slice(0, 10);
+        await storageMirrorService.mirrorBlob(`backups/scheduled-${dateStr}.zip`, exportResult.buffer);
+      }
+      return { bytes: exportResult.buffer.length, reason };
+    },
+  });
+  schedulerService.start().catch(e => console.warn(`[${info.name}] Scheduler start warning:`, e.message));
 
   // 3. 挂载前端扩展静态资源目录
   const clientDir = path.join(__dirname, 'src', 'client');
@@ -88,6 +108,9 @@ export async function init(router) {
     configService,
     sseService,
     diagnosticService,
+    disasterRecoveryService,
+    storageMirrorService,
+    schedulerService,
   });
   router.use('/', pluginRouter);
 
@@ -114,6 +137,10 @@ export async function init(router) {
  */
 export async function exit() {
   console.log(`[${info.name}] Shutting down...`);
+  if (schedulerService) {
+    schedulerService.stop();
+    schedulerService = null;
+  }
   if (gcInterval) {
     clearInterval(gcInterval);
     gcInterval = null;
@@ -124,3 +151,4 @@ export async function exit() {
   }
   console.log(`[${info.name}] Exited cleanly.`);
 }
+
