@@ -2,6 +2,7 @@ import { CloudConfigApi } from './api.js';
 import { IdbStorage } from './db/idb.js';
 import { ClientSyncManager } from './syncManager.js';
 import { ClientPoller } from './poller.js';
+import { AutoSyncEngine } from './autoSync.js';
 import { CloudConfigPanel } from './ui/panel.js';
 
 /**
@@ -32,12 +33,31 @@ export async function initExtension() {
   // 3. 初始化各核心客户端模块
   const syncManager = new ClientSyncManager(api, storage);
   const poller = new ClientPoller(api, storage, accountHandle);
+
+  const isAutoSyncEnabled = typeof localStorage !== 'undefined' && localStorage.getItem('cfgsync_pref_autosync_enabled') === 'true';
+  const autoSyncInterval = (typeof localStorage !== 'undefined' && Number(localStorage.getItem('cfgsync_pref_autosync_interval'))) || 10 * 60 * 1000;
+  const autoSyncEngine = new AutoSyncEngine({
+    api,
+    syncManager,
+    storage,
+    accountHandle,
+    enabled: isAutoSyncEnabled,
+    intervalMs: autoSyncInterval,
+  });
+  if (autoSyncEngine.enabled) {
+    autoSyncEngine.start();
+  }
+
   const panel = new CloudConfigPanel({
     api,
     syncManager,
     storage,
     accountHandle,
-    onAccountChange: (newHandle) => poller.setAccountHandle(newHandle),
+    autoSyncEngine,
+    onAccountChange: (newHandle) => {
+      poller.setAccountHandle(newHandle);
+      autoSyncEngine.setAccountHandle(newHandle);
+    },
   });
 
   // 4. 启动后台增量轮询
@@ -45,6 +65,7 @@ export async function initExtension() {
   poller.onUpdate((events) => {
     panel.handlePollerUpdate(events);
   });
+
 
   // 4. 注册并挂载到 ST 扩展设置侧边栏抽屉 (#extensions_settings)
   const mountDrawer = () => {

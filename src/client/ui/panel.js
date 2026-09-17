@@ -19,16 +19,18 @@ export class CloudConfigPanel {
    * @param {string} context.accountHandle
    * @param {(newHandle: string) => void} [context.onAccountChange]
    */
-  constructor({ api, syncManager, storage, accountHandle, onAccountChange }) {
+  constructor({ api, syncManager, storage, accountHandle, onAccountChange, autoSyncEngine = null }) {
     this.api = api;
     this.syncManager = syncManager;
     this.storage = storage;
     this.accountHandle = accountHandle;
     this.onAccountChange = onAccountChange;
+    this.autoSyncEngine = autoSyncEngine;
     this.container = null;
     this._refreshing = false;
     this.thumbnailCache = new Map();
   }
+
 
   render(targetEl) {
     this.container = targetEl;
@@ -175,10 +177,12 @@ export class CloudConfigPanel {
       e.stopPropagation();
       showSettingsDialog({
         api: this.api,
+        autoSyncEngine: this.autoSyncEngine,
         onUpdated: () => this.refresh(),
       });
     };
   }
+
 
   bindClaim() {
     const claimBtn = this.container.querySelector('#cfgsync-claim-btn');

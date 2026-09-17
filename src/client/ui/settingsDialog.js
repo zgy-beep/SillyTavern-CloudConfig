@@ -2,7 +2,7 @@
  * 云同步设置弹窗 (本机偏好 + 管理员全局同步策略)
  */
 
-export async function showSettingsDialog({ api, onUpdated = null }) {
+export async function showSettingsDialog({ api, autoSyncEngine = null, onUpdated = null }) {
   const overlay = document.createElement('div');
   overlay.className = 'cfgsync-modal-overlay';
   overlay.style.cssText = `
@@ -55,7 +55,31 @@ export async function showSettingsDialog({ api, onUpdated = null }) {
             <div style="font-size:11px; color:#8b949e; line-height:1.4; margin-top:2px;">排除巨大变量和运行时脚本，让 settings 快照体积降低 ~85%</div>
           </div>
         </label>
+
+        <!-- 自动同步偏好 (P6-4, #12) -->
+        <div style="margin-top:10px; padding-top:8px; border-top:1px dashed rgba(255,255,255,0.06);">
+          <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; font-size:12px; color:#c9d1d9; user-select:none;">
+            <input id="cfgsync-pref-autosync-enabled" type="checkbox" style="accent-color:#1890ff; width:15px; height:15px; margin-top:2px; cursor:pointer;" />
+            <div style="flex:1;">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span style="font-weight:500; color:#e6edf3;">开启后台自动同步 (实验性/无感避让)</span>
+                <span id="cfgsync-autosync-chip" style="font-size:10px; padding:1px 5px; border-radius:3px; background:rgba(255,255,255,0.08); color:#8b949e;">默认关闭</span>
+              </div>
+              <div style="font-size:11px; color:#8b949e; line-height:1.4; margin-top:2px;">在空闲时定期向云端安全备份已开启同步的资产。正在打字或 AI 生成时严格避让，遇到冲突绝不静默覆盖。</div>
+            </div>
+          </label>
+          <div id="cfgsync-pref-autosync-options" style="display:none; align-items:center; justify-content:space-between; margin-top:8px; padding-left:24px;">
+            <span style="font-size:11.5px; color:#8b949e;">自动同步执行周期:</span>
+            <select id="cfgsync-pref-autosync-interval" style="height:22px; font-size:11px; padding:0 6px; border-radius:4px; background:#12151d; border:1px solid rgba(255,255,255,0.18); color:#58a6ff; outline:none;">
+              <option value="300000">每 5 分钟</option>
+              <option value="600000" selected>每 10 分钟</option>
+              <option value="1800000">每 30 分钟</option>
+              <option value="3600000">每 60 分钟</option>
+            </select>
+          </div>
+        </div>
       </div>
+
 
       <!-- 2. 服务端全局策略 (需要管理员权限) -->
       <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px 14px;">
@@ -144,6 +168,78 @@ export async function showSettingsDialog({ api, onUpdated = null }) {
       localStorage.setItem('cfgsync_pref_exclude_heavy', String(prefHeavy.checked));
     }
   };
+
+  const prefAutosync = modal.querySelector('#cfgsync-pref-autosync-enabled');
+  const autosyncOptions = modal.querySelector('#cfgsync-pref-autosync-options');
+  const autosyncInterval = modal.querySelector('#cfgsync-pref-autosync-interval');
+  const autosyncChip = modal.querySelector('#cfgsync-autosync-chip');
+
+  const updateAutosyncChip = (enabled) => {
+    if (enabled) {
+      autosyncChip.textContent = '运行中';
+      autosyncChip.style.background = 'rgba(82,196,26,0.15)';
+      autosyncChip.style.color = '#52c41a';
+      autosyncOptions.style.display = 'flex';
+    } else {
+      autosyncChip.textContent = '已关闭';
+      autosyncChip.style.background = 'rgba(255,255,255,0.08)';
+      autosyncChip.style.color = '#8b949e';
+      autosyncOptions.style.display = 'none';
+    }
+  };
+
+  const isAutoSyncEnabled = autoSyncEngine ? autoSyncEngine.enabled : (typeof localStorage !== 'undefined' && localStorage.getItem('cfgsync_pref_autosync_enabled') === 'true');
+  prefAutosync.checked = isAutoSyncEnabled;
+  updateAutosyncChip(isAutoSyncEnabled);
+
+  if (autoSyncEngine) {
+    autosyncInterval.value = String(autoSyncEngine.intervalMs);
+  } else if (typeof localStorage !== 'undefined') {
+    const savedInterval = localStorage.getItem('cfgsync_pref_autosync_interval');
+    if (savedInterval) autosyncInterval.value = savedInterval;
+  }
+
+  prefAutosync.onchange = async () => {
+    if (prefAutosync.checked) {
+      if (autoSyncEngine) {
+        const ok = await autoSyncEngine.requestEnable();
+        if (!ok) {
+          prefAutosync.checked = false;
+          updateAutosyncChip(false);
+          return;
+        }
+      } else if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+        const ok = window.confirm('开启自动同步前请确认：\n\n自动同步将在后台空闲时定期备份配置与资产至云端。系统检测到用户正在输入或 AI 正在生成回复时将自动避让。若遇到云端版本冲突将安全暂停并提示人工处理。\n\n是否确认开启？');
+        if (!ok) {
+          prefAutosync.checked = false;
+          updateAutosyncChip(false);
+          return;
+        }
+      }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('cfgsync_pref_autosync_enabled', 'true');
+      }
+      updateAutosyncChip(true);
+    } else {
+      if (autoSyncEngine) autoSyncEngine.disable();
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('cfgsync_pref_autosync_enabled', 'false');
+      }
+      updateAutosyncChip(false);
+    }
+  };
+
+  autosyncInterval.onchange = () => {
+    const val = Number(autosyncInterval.value) || 600000;
+    if (autoSyncEngine) {
+      autoSyncEngine.intervalMs = val;
+      if (autoSyncEngine.enabled) autoSyncEngine.start();
+    }
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('cfgsync_pref_autosync_interval', String(val));
+    }
+  };
+
 
   try {
     const [ctRes, configRes] = await Promise.all([
