@@ -62,10 +62,20 @@ export class CloudConfigPanel {
               <i class="fa-solid fa-cloud-arrow-up" style="font-size:10px;"></i>
               <span class="cfgsync-backup-all-text">一键备份</span>
             </button>
+            <button id="cfgsync-export-backup-btn" type="button" title="导出全量配置与资产灾备归档包 (.zip)" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 7px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#b37feb; background:rgba(179,127,235,0.12); border:1px solid rgba(179,127,235,0.3); cursor:pointer; user-select:none;">
+              <i class="fa-solid fa-file-zipper" style="font-size:10px;"></i>
+              <span class="cfgsync-export-backup-text">灾备导出</span>
+            </button>
+            <button id="cfgsync-import-backup-btn" type="button" title="导入灾备归档包 (.zip，零静默覆盖)" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 7px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#faad14; background:rgba(250,173,20,0.12); border:1px solid rgba(250,173,20,0.3); cursor:pointer; user-select:none;">
+              <i class="fa-solid fa-file-import" style="font-size:10px;"></i>
+              <span class="cfgsync-import-backup-text">灾备导入</span>
+            </button>
+            <input type="file" id="cfgsync-dr-file-input" accept=".zip,application/zip,application/x-zip-compressed" style="display:none;" />
             <button id="cfgsync-claim-btn" type="button" title="认领好友分享给你的配置邀请码" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 8px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#52c41a; background:rgba(82,196,26,0.12); border:1px solid rgba(82,196,26,0.3); cursor:pointer; user-select:none;">
               <i class="fa-solid fa-key" style="font-size:10px;"></i>
               <span>认领</span>
             </button>
+
             <button id="cfgsync-settings-btn" type="button" title="云同步设置" style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; margin:0; border-radius:4px; font-size:10.5px; color:#c9d1d9; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18); cursor:pointer; user-select:none;">
               <i class="fa-solid fa-gear"></i>
             </button>
@@ -96,7 +106,9 @@ export class CloudConfigPanel {
     this.bindSettings();
     this.bindDashboard();
     this.bindSearchFilter();
+    this.bindDisasterRecovery();
   }
+
 
   bindSearchFilter() {
     const searchInput = this.container.querySelector('#cfgsync-search-input');
@@ -150,6 +162,102 @@ export class CloudConfigPanel {
       catSelect.addEventListener('change', applyFilter);
     }
   }
+
+  /**
+   * 绑定灾备全量导出与安全导入 (BUG-P6-02)
+   */
+  bindDisasterRecovery() {
+    const exportBtn = this.container.querySelector('#cfgsync-export-backup-btn');
+    const importBtn = this.container.querySelector('#cfgsync-import-backup-btn');
+    const fileInput = this.container.querySelector('#cfgsync-dr-file-input');
+
+    if (exportBtn && !exportBtn.dataset.bound) {
+      exportBtn.dataset.bound = 'true';
+      exportBtn.onclick = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const confirmMsg = '即将导出当前账号与云端的全量灾备归档包 (ZIP)。\n包含全部数据库配置元数据、完整版本快照以及关联的二进制立绘/背景/表情包/头像。\n\n是否立即导出下载？';
+        if (typeof confirm === 'function' && !confirm(confirmMsg)) {
+          return;
+        }
+
+        const icon = exportBtn.querySelector('i');
+        const textSpan = exportBtn.querySelector('.cfgsync-export-backup-text');
+        exportBtn.disabled = true;
+        if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
+        if (textSpan) textSpan.textContent = '导出中...';
+
+        try {
+          const { blob, fileName } = await this.api.exportBackup();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }, 1000);
+
+          if (typeof toastr !== 'undefined' && toastr.success) {
+            toastr.success(`灾备归档「${fileName}」导出成功`, '云配置');
+          } else {
+            alert(`【灾备包导出成功】\n\n已下载文件: ${fileName}\n体积: ${(blob.size / 1024).toFixed(1)} KB`);
+          }
+        } catch (err) {
+          alert(`导出灾备包失败: ${err.message}`);
+        } finally {
+          exportBtn.disabled = false;
+          if (icon) icon.className = 'fa-solid fa-file-zipper';
+          if (textSpan) textSpan.textContent = '灾备导出';
+        }
+      };
+    }
+
+    if (importBtn && fileInput && !importBtn.dataset.bound) {
+      importBtn.dataset.bound = 'true';
+      importBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        fileInput.click();
+      };
+
+      fileInput.onchange = async () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+
+        const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+        const confirmMsg = `确定导入灾备文件「${file.name}」(${sizeMB} MB)？\n\n【安全保障铁律】\n• 导入遵循零静默覆盖原则：冲突项将作为递增新版本安全入库；\n• 本地旧版本与历史快照 100% 完整保留，随时可通过「版本历史」回滚。\n\n是否立即开始导入？`;
+        if (typeof confirm === 'function' && !confirm(confirmMsg)) {
+          fileInput.value = '';
+          return;
+        }
+
+        const icon = importBtn.querySelector('i');
+        const textSpan = importBtn.querySelector('.cfgsync-import-backup-text');
+        importBtn.disabled = true;
+        if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
+        if (textSpan) textSpan.textContent = '导入中...';
+
+        try {
+          const res = await this.api.importBackup(file);
+          const receipt = `【灾备安全导入完成】\n\n• 新增/同步配置项: ${res.importedRecords || 0} 个\n• 导入历史快照版本: ${res.importedVersions || 0} 个\n• 冲突项安全保留为新版本: ${res.conflictCount || 0} 个\n\n全部数据已安全落盘并可追溯回滚。`;
+          alert(receipt);
+          await this.refresh();
+        } catch (err) {
+          alert(`导入灾备包失败: ${err.message}`);
+        } finally {
+          fileInput.value = '';
+          importBtn.disabled = false;
+          if (icon) icon.className = 'fa-solid fa-file-import';
+          if (textSpan) textSpan.textContent = '灾备导入';
+        }
+      };
+    }
+  }
+
 
   bindDashboard() {
     const dashBtn = this.container.querySelector('#cfgsync-dashboard-btn');

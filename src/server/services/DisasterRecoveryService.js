@@ -253,7 +253,7 @@ export class DisasterRecoveryService {
           // 在事务后由 fs 异步写入或同步确保目录存在
         }
 
-        stmtInsertVersion.run({
+        const runRes = stmtInsertVersion.run({
           ':owner': owner,
           ':ct': ver.content_type,
           ':uid': ver.item_uid,
@@ -269,9 +269,12 @@ export class DisasterRecoveryService {
           ':createdAt': ver.created_at || Date.now(),
           ':clientId': 'disaster_recovery_import',
         });
-        importedVersions++;
+        if (runRes && runRes.changes > 0) {
+          importedVersions++;
+        }
       }
     });
+
 
     // 落地写盘 Blob 文件
     if (directories) {

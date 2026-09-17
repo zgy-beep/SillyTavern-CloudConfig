@@ -160,6 +160,64 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
         </div>
       `;
 
+      // 4. 异地容灾归档与存储驱动状态 (BUG-P6-02, BUG-P6-03, BUG-P6-04)
+      let storageHealth = null;
+      try {
+        storageHealth = await api.getStorageHealth();
+      } catch {}
+
+      const localDriver = storageHealth?.local || { enabled: false };
+      const webdavDriver = storageHealth?.webdav || { enabled: false };
+
+      html += `
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:12px 14px;">
+          <div style="font-size:12px; font-weight:600; color:#b37feb; margin-bottom:10px; display:flex; align-items:center; justify-content:space-between;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <i class="fa-solid fa-box-archive"></i> <span>全量灾备归档与外部存储驱动 (M3/M6)</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <button id="cfgsync-admin-dr-export-btn" class="menu_button" style="padding:3px 9px; font-size:11px; border-radius:4px; cursor:pointer; background:rgba(179,127,235,0.15); border:1px solid rgba(179,127,235,0.4); color:#b37feb;">
+                <i class="fa-solid fa-file-zipper"></i> 导出灾备包
+              </button>
+              <button id="cfgsync-admin-dr-import-btn" class="menu_button" style="padding:3px 9px; font-size:11px; border-radius:4px; cursor:pointer; background:rgba(250,173,20,0.15); border:1px solid rgba(250,173,20,0.4); color:#faad14;">
+                <i class="fa-solid fa-file-import"></i> 导入灾备包
+              </button>
+              <input type="file" id="cfgsync-admin-dr-file-input" accept=".zip,application/zip" style="display:none;" />
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-size:11.5px;">
+            <!-- LocalPath 状态 -->
+            <div style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.08); border-radius:5px; padding:8px 10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <strong style="color:#e6edf3;">LocalPath (本地/SMB挂载)</strong>
+                <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:${localDriver.enabled ? (localDriver.healthy ? 'rgba(82,196,26,0.2)' : 'rgba(248,81,73,0.2)') : 'rgba(255,255,255,0.08)'}; color:${localDriver.enabled ? (localDriver.healthy ? '#52c41a' : '#f85149') : '#8b949e'};">
+                  ${localDriver.enabled ? (localDriver.healthy ? '就绪 (Healthy)' : '未就绪 (异常)') : '未启用'}
+                </span>
+              </div>
+              <div style="color:rgba(255,255,255,0.6); font-size:11px; word-break:break-all; line-height:1.4;">
+                ${localDriver.enabled ? `路径: <code>${localDriver.resolvedPath || localDriver.path || '未指定'}</code>` : '可在设置中配置本地镜像同步目录'}
+              </div>
+              ${localDriver.containerWarning ? `<div style="margin-top:4px; color:#faad14; font-size:10.5px; line-height:1.3;">${localDriver.containerWarning}</div>` : ''}
+            </div>
+
+            <!-- WebDAV 状态 -->
+            <div style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.08); border-radius:5px; padding:8px 10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <strong style="color:#e6edf3;">WebDAV 远端网盘</strong>
+                <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:${webdavDriver.enabled ? (webdavDriver.healthy ? 'rgba(82,196,26,0.2)' : 'rgba(248,81,73,0.2)') : 'rgba(255,255,255,0.08)'}; color:${webdavDriver.enabled ? (webdavDriver.healthy ? '#52c41a' : '#f85149') : '#8b949e'};">
+                  ${webdavDriver.enabled ? (webdavDriver.healthy ? '正常' : webdavDriver.code || '未连接') : '未启用'}
+                </span>
+              </div>
+              <div style="color:rgba(255,255,255,0.6); font-size:11px; line-height:1.4;">
+                ${webdavDriver.enabled ? (webdavDriver.message || (webdavDriver.healthy ? '连接正常' : '连接异常')) : '可在设置中配置群晖/Alist/Nextcloud'}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+
       bodyEl.innerHTML = html;
 
       // 绑定清理扫描事件
@@ -226,7 +284,68 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
           }
         };
       }
+
+      // 绑定全量灾备导出与导入
+      const adminExportBtn = bodyEl.querySelector('#cfgsync-admin-dr-export-btn');
+      const adminImportBtn = bodyEl.querySelector('#cfgsync-admin-dr-import-btn');
+      const adminFileInput = bodyEl.querySelector('#cfgsync-admin-dr-file-input');
+
+      if (adminExportBtn) {
+        adminExportBtn.onclick = async () => {
+          if (!confirm('确定导出全量灾备归档包 (ZIP)？\n包含数据库配置、完整版本快照与全部二进制 Blob 文件。')) return;
+
+          adminExportBtn.disabled = true;
+          adminExportBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 导出中...';
+          try {
+            const { blob, fileName } = await api.exportBackup();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }, 1000);
+            alert(`【灾备导出成功】\n已下载: ${fileName}`);
+          } catch (e) {
+            alert(`导出失败: ${e.message}`);
+          } finally {
+            adminExportBtn.disabled = false;
+            adminExportBtn.innerHTML = '<i class="fa-solid fa-file-zipper"></i> 导出灾备包';
+          }
+        };
+      }
+
+      if (adminImportBtn && adminFileInput) {
+        adminImportBtn.onclick = () => adminFileInput.click();
+        adminFileInput.onchange = async () => {
+          const file = adminFileInput.files?.[0];
+          if (!file) return;
+
+          if (!confirm(`确定导入灾备归档「${file.name}」？\n\n【安全铁律】\n• 导入绝不静默覆盖；\n• 冲突项将作为递增新版本保存，随时可回滚。`)) {
+            adminFileInput.value = '';
+            return;
+          }
+
+          adminImportBtn.disabled = true;
+          adminImportBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 导入中...';
+          try {
+            const res = await api.importBackup(file);
+            alert(`【灾备安全导入完成】\n\n• 新增/同步配置项: ${res.importedRecords || 0} 个\n• 导入历史快照版本: ${res.importedVersions || 0} 个\n• 冲突项安全保留为新版本: ${res.conflictCount || 0} 个`);
+            await renderDashboard();
+          } catch (e) {
+            alert(`导入失败: ${e.message}`);
+          } finally {
+            adminFileInput.value = '';
+            adminImportBtn.disabled = false;
+            adminImportBtn.innerHTML = '<i class="fa-solid fa-file-import"></i> 导入灾备包';
+          }
+        };
+      }
     } catch (err) {
+
       bodyEl.innerHTML = `<div style="text-align:center; padding:24px; color:#f85149;">加载看板失败: ${err.message}</div>`;
     }
   };

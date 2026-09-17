@@ -280,4 +280,68 @@ export class CloudConfigApi {
       }),
     });
   }
+
+  /**
+   * 导出全量灾备归档包 (ZIP)
+   * @returns {Promise<{ blob: Blob, fileName: string }>}
+   */
+  async exportBackup() {
+    const url = `${this.baseUrl}/backup/export`;
+    const stHeaders = await this.getHeaders();
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: stHeaders,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `导出灾备包失败 (${res.status})`);
+    }
+
+    const disposition = res.headers.get('content-disposition');
+    let fileName = 'cfgsync-backup.zip';
+    if (disposition && disposition.includes('filename=')) {
+      const match = disposition.match(/filename="?([^";]+)"?/);
+      if (match && match[1]) fileName = match[1];
+    }
+
+    const blob = await res.blob();
+    return { blob, fileName };
+  }
+
+  /**
+   * 导入灾备归档包 (支持 File, Blob, ArrayBuffer, Buffer)
+   * 采用标准 application/octet-stream 原始二进制流传输，绝无 JSON 内存膨胀 (BUG-P6-01)
+   * @param {Blob | ArrayBuffer | Buffer} data
+   */
+  async importBackup(data) {
+    const url = `${this.baseUrl}/backup/import`;
+    const stHeaders = await this.getHeaders();
+    const headers = {
+      ...stHeaders,
+      'Content-Type': 'application/octet-stream',
+    };
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: data,
+    });
+
+    const resData = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(resData.message || `导入灾备包失败 (${res.status})`);
+      err.status = res.status;
+      err.data = resData;
+      throw err;
+    }
+    return resData;
+  }
+
+  /**
+   * 检查外部存储驱动与挂载点健康状态 (BUG-P6-04)
+   */
+  async getStorageHealth() {
+    return this.request('/storage/health');
+  }
 }
+

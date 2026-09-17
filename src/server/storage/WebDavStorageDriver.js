@@ -151,13 +151,14 @@ export class WebDavStorageDriver {
    * WebDAV 连接连通性健康探测 (PROPFIND / OPTIONS)
    * 返回精准诊断结果
    */
-  async checkHealth() {
+  async checkHealth(timeoutMs = 3000) {
     if (!this.url) {
       return { healthy: false, code: 'NOT_CONFIGURED', message: 'WebDAV URL 未配置' };
     }
 
+    const effectiveTimeout = Math.min(Number(timeoutMs) || 3000, Number(this.timeoutMs) || 8000);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Math.min(this.timeoutMs, 5000));
+    const timer = setTimeout(() => controller.abort(), effectiveTimeout);
 
     try {
       const resp = await fetch(this.url, {

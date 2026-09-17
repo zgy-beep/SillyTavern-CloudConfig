@@ -57,6 +57,29 @@ export class MigrationService {
     const targetDbPath = path.join(activeTargetRoot, 'cfgsync.sqlite');
     const targetSecretPath = path.join(activeTargetRoot, '.server_secret');
     const targetConfigPath = path.join(activeTargetRoot, 'cfgsync_config.json');
+    const oldMarkerPath = path.join(oldDataDir, '.migrated_to');
+
+    // 0. P6-R2: 快速通道——若老目录已存在迁移成功标记且目标库就绪，立即放行，永不重复仲裁
+    if (fs.existsSync(oldMarkerPath) && fs.existsSync(targetDbPath)) {
+      return {
+        success: true,
+        activeDataRoot: activeTargetRoot,
+        dbPath: targetDbPath,
+        migrated: false,
+        skipped: true,
+        reason: 'already_migrated_marker',
+      };
+    }
+
+    // 清理老目录可能被第三方脚本误建的 0 字节空库 (P6-R2)
+    if (fs.existsSync(oldDbPath) && fs.existsSync(targetDbPath)) {
+      try {
+        const stats = fs.statSync(oldDbPath);
+        if (stats.size === 0) {
+          fs.unlinkSync(oldDbPath);
+        }
+      } catch {}
+    }
 
     // 1. 若目标目录与老目录完全一致，直接放行
     if (path.resolve(oldDataDir) === path.resolve(activeTargetRoot)) {
@@ -67,6 +90,7 @@ export class MigrationService {
         migrated: false,
       };
     }
+
 
     // 2. 确保目标目录存在
     try {
@@ -218,6 +242,26 @@ export class MigrationService {
         console.warn('[cfgsync:migration] 写入迁移审计失败:', err.message);
       }
 
+      // 7.11 标记老路径已完成迁移并冷备老库，清理残留 (P6-R2, P6-R3)
+      try {
+        await fsPromises.writeFile(oldMarkerPath, JSON.stringify({
+          migratedTo: activeTargetRoot,
+          migratedAt: Date.now(),
+        }, null, 2), 'utf8');
+
+        // 将原旧库重命名为冷备文件，避免原文件名残留触发后续启动误判
+        const oldBakRename = `${oldDbPath}.bak-migrated-${timestamp}`;
+        await fsPromises.rename(oldDbPath, oldBakRename).catch(() => {});
+
+        // 清理老目录下误建的杂散 data/cfgsync 子目录 (P6-R3)
+        const straySubDir = path.join(oldDataDir, 'cfgsync');
+        if (fs.existsSync(straySubDir)) {
+          await fsPromises.rm(straySubDir, { recursive: true, force: true }).catch(() => {});
+        }
+      } catch (e) {
+        console.warn('[cfgsync:migration] 写入迁移标记警告:', e.message);
+      }
+
       console.log(`[cfgsync:migration] 迁移成功完成！新数据根: ${activeTargetRoot}`);
       return {
         success: true,
@@ -225,6 +269,7 @@ export class MigrationService {
         dbPath: targetDbPath,
         migrated: true,
       };
+
 
     } catch (err) {
       console.error('[cfgsync:migration] 迁移校验失败，安全回退使用旧路径:', err.message);
@@ -407,7 +452,18 @@ export class MigrationService {
         console.warn('[cfgsync:migration] 重命名老库冷备失败:', err.message);
       }
 
+      // 写入迁移完成标记，后续启动快速跳过仲裁 (P6-R2)
+      try {
+        const oldMarkerPath = path.join(oldDataDir, '.migrated_to');
+        await fsPromises.writeFile(oldMarkerPath, JSON.stringify({
+          migratedTo: activeTargetRoot,
+          arbitratedAt: Date.now(),
+          winner: 'target',
+        }, null, 2), 'utf8');
+      } catch {}
+
       console.log(`[cfgsync:migration] 仲裁结果: 目标位置数据库更全，启用 ${targetDbPath}，老库已冷备为 ${oldBakPath}`);
+
       return {
         success: true,
         activeDataRoot: activeTargetRoot,

@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
+import { Readable } from 'node:stream';
 
 import { LocalPathStorageDriver } from '../../src/server/storage/LocalPathStorageDriver.js';
 import { WebDavStorageDriver } from '../../src/server/storage/WebDavStorageDriver.js';
 import { StorageMirrorService } from '../../src/server/services/StorageMirrorService.js';
+import { MigrationService } from '../../src/server/services/MigrationService.js';
 import { DiskGuard, InsufficientStorageError } from '../../src/server/utils/DiskGuard.js';
 import { DisasterRecoveryService } from '../../src/server/services/DisasterRecoveryService.js';
 import { SchedulerService } from '../../src/server/services/SchedulerService.js';
@@ -325,9 +328,10 @@ test('Phase 6 Milestone 3: 容灾备份、外部驱动镜像与断电自愈调�
       status: (c) => { resStatus = c; return resImportMock; },
       json: (data) => { importResBody = data; },
     };
+    const importHandler = importRoute.route.stack[importRoute.route.stack.length - 1].handle;
     await new Promise((resolve, reject) => {
       resImportMock.json = (data) => { importResBody = data; resolve(); };
-      importRoute.route.stack[0].handle(reqImportMock, resImportMock, reject);
+      importHandler(reqImportMock, resImportMock, reject);
     });
     assert.strictEqual(importResBody.success, true);
 
@@ -356,5 +360,176 @@ test('Phase 6 Milestone 3: 容灾备份、外部驱动镜像与断电自愈调�
     assert.strictEqual(errorJson.code, 'INSUFFICIENT_STORAGE');
     assert.strictEqual(errorJson.availableBytes, 1024);
     assert.strictEqual(errorJson.requiredBytes, 4096);
+  });
+
+  await t.test('9. BUG-P6-01: POST /backup/import 原始二进制流通道与异常容错', async () => {
+    const drService = new DisasterRecoveryService({ dbClient, snapshotStore, auditService });
+    const localDriver = new LocalPathStorageDriver({ basePath: path.join(tempBase, 'health_test_2'), enabled: true });
+    const storageMirror = new StorageMirrorService({ localDriver });
+    const sync = new SyncService(dbClient, adapters, snapshotStore, authService, configService, 10, storageMirror);
+    sync.dataRoot = tempBase;
+
+    const router = createPluginRouter({
+      syncService: sync,
+      authService,
+      adapters,
+      configService,
+      disasterRecoveryService: drService,
+      storageMirrorService: storageMirror,
+    });
+
+    const exportRes = await drService.exportBackup('test_disk_user');
+    const importRoute = router.stack.find(s => s.route?.path === '/backup/import');
+    assert.ok(importRoute);
+    const handler = importRoute.route.stack[importRoute.route.stack.length - 1].handle;
+
+    // 1) 原始 Buffer 直接传入
+    const reqDirect = {
+      method: 'POST',
+      url: '/backup/import',
+      headers: { 'content-type': 'application/octet-stream' },
+      authContext: { handle: 'test_disk_user', role: 'admin' },
+      body: exportRes.buffer,
+    };
+    let jsonResult = null;
+    await new Promise((resolve, reject) => {
+      handler(reqDirect, { json: (d) => { jsonResult = d; resolve(); }, status: () => ({ json: resolve }) }, reject);
+    });
+    assert.strictEqual(jsonResult.success, true);
+
+    // 2) 模拟可读流 (Stream chunks)
+    const stream = Readable.from([exportRes.buffer.subarray(0, 100), exportRes.buffer.subarray(100)]);
+    const reqStream = {
+      method: 'POST',
+      url: '/backup/import',
+      headers: { 'content-type': 'application/zip' },
+      authContext: { handle: 'test_disk_user', role: 'admin' },
+      readable: true,
+      [Symbol.asyncIterator]: () => stream[Symbol.asyncIterator](),
+    };
+    let jsonStreamResult = null;
+    await new Promise((resolve, reject) => {
+      handler(reqStream, { json: (d) => { jsonStreamResult = d; resolve(); }, status: () => ({ json: resolve }) }, reject);
+    });
+    assert.strictEqual(jsonStreamResult.success, true);
+
+    // 3) 空数据拦截
+    let errorStatus = 200;
+    let errorJson = null;
+    const reqEmpty = {
+      method: 'POST',
+      url: '/backup/import',
+      headers: {},
+      authContext: { handle: 'test_disk_user', role: 'admin' },
+      body: Buffer.alloc(0),
+    };
+    await new Promise((resolve, reject) => {
+      handler(reqEmpty, {
+        status: (c) => { errorStatus = c; return { json: (j) => { errorJson = j; resolve(); } }; },
+        json: (j) => { errorJson = j; resolve(); },
+      }, reject);
+    });
+    assert.strictEqual(errorStatus, 400);
+    assert.match(errorJson.message, /ZIP body is required/);
+  });
+
+  await t.test('10. BUG-P6-04: LocalPathStorageDriver checkHealth 超时防护 (<= 3s) 与非阻塞降级', async () => {
+    const driver = new LocalPathStorageDriver({ basePath: path.join(tempBase, 'timeout_test'), enabled: true });
+
+    // 模拟挂起/超时的文件系统调用 (如挂起的写操作)
+    const origWriteFile = fsSync.promises.writeFile;
+    try {
+      fsSync.promises.writeFile = () => new Promise(resolve => setTimeout(resolve, 500));
+      const start = Date.now();
+      const health = await driver.checkHealth(50); // 设置 50ms 超时
+      const duration = Date.now() - start;
+
+      assert.strictEqual(health.healthy, false);
+      assert.strictEqual(health.code, 'TIMEOUT');
+      assert.ok(duration < 450, `Health check should return quickly on timeout, took ${duration}ms`);
+    } finally {
+      fsSync.promises.writeFile = origWriteFile;
+    }
+  });
+
+  await t.test('11. BUG-P6-03: LocalPathStorageDriver 容器环境检测与绝对路径解析', async () => {
+    const testPath = './some_relative_path';
+    const driver = new LocalPathStorageDriver({ basePath: testPath, enabled: true });
+
+    // 无论输入相对还是绝对路径，resolvedPath 始终为标准化绝对路径
+    assert.ok(path.isAbsolute(driver.resolvedPath));
+
+    // 测试容器环境判断
+    const isContainer = driver.isContainerEnvironment();
+    assert.strictEqual(typeof isContainer, 'boolean');
+
+    // 模拟容器环境下健康检查
+    const origDetect = driver.isContainerEnvironment;
+    try {
+      driver.isContainerEnvironment = () => true;
+      const health = await driver.checkHealth(1000);
+      assert.strictEqual(health.isContainer, true);
+      assert.ok(health.containerWarning);
+      assert.match(health.containerWarning, /Docker/);
+    } finally {
+      driver.isContainerEnvironment = origDetect;
+    }
+  });
+
+  await t.test('12. P6-R2: MigrationService .migrated_to 标记文件写入与二次启动 Fast-Path 跳过', async () => {
+    const mTestDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cfgsync_marker_test_'));
+    try {
+      const pluginDir = path.join(mTestDir, 'plugin');
+      const oldDataDir = path.join(pluginDir, 'data');
+      await fs.mkdir(oldDataDir, { recursive: true });
+
+      // 创建测试旧库
+      const oldDbPath = path.join(oldDataDir, 'cfgsync.sqlite');
+      const oldDb = new DatabaseClient(oldDbPath);
+      oldDb.prepare("CREATE TABLE IF NOT EXISTS config_records (id INTEGER PRIMARY KEY);").run();
+      oldDb.close();
+
+      const targetDataRoot = path.join(mTestDir, 'st_data', 'cfgsync');
+
+      // 第一次运行迁移
+      const res1 = await MigrationService.migrateIfNeeded({
+        pluginDir,
+        targetDataRoot,
+      });
+      assert.strictEqual(res1.success, true);
+      assert.strictEqual(res1.migrated, true);
+
+      // 验证生成了 .migrated_to 标记文件
+      const markerPath = path.join(oldDataDir, '.migrated_to');
+      assert.ok(fsSync.existsSync(markerPath), '.migrated_to marker file must exist after migration');
+      const markerContent = fsSync.readFileSync(markerPath, 'utf8');
+      const marker = JSON.parse(markerContent);
+      assert.strictEqual(path.resolve(marker.migratedTo), path.resolve(targetDataRoot));
+
+      // 第二次运行迁移：命中快速跳过
+      const res2 = await MigrationService.migrateIfNeeded({
+        pluginDir,
+        targetDataRoot,
+      });
+      assert.strictEqual(res2.success, true);
+      assert.strictEqual(res2.skipped, true);
+      assert.strictEqual(res2.reason, 'already_migrated_marker');
+    } finally {
+      await fs.rm(mTestDir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('13. P6-R4: 重复导入备份时 importedVersions 精确计数 (已存在版本不虚增)', async () => {
+    const drService = new DisasterRecoveryService({ dbClient, snapshotStore, auditService });
+    const exportResult = await drService.exportBackup('test_disk_user');
+
+    // 第一次导入：有新记录和新版本入库
+    const res1 = await drService.importBackup(exportResult.buffer, 'test_disk_user');
+    assert.strictEqual(res1.success, true);
+
+    // 第二次原样导入：因无新版本写入，importedVersions 必须精确为 0
+    const res2 = await drService.importBackup(exportResult.buffer, 'test_disk_user');
+    assert.strictEqual(res2.success, true);
+    assert.strictEqual(res2.importedVersions, 0, '已存在的历史版本再次导入时，importedVersions 计数必须为 0');
   });
 });

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { AuthContext } from '../auth/AuthContext.js';
 import { P0ContentTypes, ContentTypeGroup, Permission } from '../../common/constants.js';
 import { ShareService } from '../services/ShareService.js';
@@ -869,36 +869,66 @@ export function createPluginRouter({
     res.send(result.buffer);
   }));
 
-  // 18. POST /backup/import (#8 灾备安全导入，零静默覆盖)
-  router.post('/backup/import', asyncHandler(async (req, res) => {
+  // 18. POST /backup/import (#8 灾备安全导入，零静默覆盖，BUG-P6-01 原始二进制字节通道)
+  const rawZipParser = express.raw({
+    limit: '250mb',
+    type: ['application/octet-stream', 'application/zip', 'application/x-zip-compressed', 'application/x-zip', '*/*'],
+  });
+
+  router.post('/backup/import', rawZipParser, asyncHandler(async (req, res) => {
     if (!drService) {
       return res.status(503).json({ error: 'ServiceUnavailable', message: 'Disaster recovery service unavailable' });
     }
     const requester = req.authContext.handle;
     let zipBuffer = null;
+
     if (Buffer.isBuffer(req.body)) {
       zipBuffer = req.body;
     } else if (req.body?.buffer) {
       zipBuffer = Buffer.isBuffer(req.body.buffer) ? req.body.buffer : Buffer.from(req.body.buffer);
     } else if (typeof req.body === 'string') {
       zipBuffer = Buffer.from(req.body, 'base64');
-    } else {
-      return res.status(400).json({ error: 'BadRequest', message: 'ZIP body is required for import' });
+    } else if (req.readable) {
+      // 容错兜底：若前置未拦截并解析，从可读流异步读取完整原始 Buffer
+      const chunks = [];
+      for await (const chunk of req) {
+        chunks.push(chunk);
+      }
+      if (chunks.length > 0) {
+        zipBuffer = Buffer.concat(chunks);
+      }
+    }
+
+    if (!zipBuffer || zipBuffer.length === 0) {
+      return res.status(400).json({ error: 'BadRequest', message: 'ZIP body is required for import (raw binary buffer, base64 or stream)' });
     }
 
     const importRes = await drService.importBackup(zipBuffer, requester, req.authContext.directories);
     res.json(importRes);
   }));
 
-  // 19. GET /storage/health (外部存储驱动健康检查与三态诊断，#9, #18)
+  // 19. GET /storage/health (外部存储驱动健康检查与三态诊断，#9, #18, BUG-P6-04 超时保护)
   router.get('/storage/health', asyncHandler(async (req, res) => {
     const mirror = storageMirrorService || syncService?.storageMirror;
     if (!mirror) {
       return res.json({ healthy: true, local: { enabled: false }, webdav: { enabled: false } });
     }
-    const health = await mirror.checkHealth();
+    // 强制超时保护（≤3s），绝不卡死 Node 事件循环
+    const timeoutPromise = new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({
+          healthy: false,
+          error: 'STORAGE_HEALTH_TIMEOUT',
+          message: '外部存储健康探测超时（挂载点未响应），已快速失败返回',
+          local: { enabled: true, healthy: false, error: 'TIMEOUT' },
+          webdav: { enabled: false, healthy: false },
+        });
+      }, 3500);
+    });
+    const health = await Promise.race([mirror.checkHealth(3000), timeoutPromise]);
     res.json(health);
   }));
+
 
   // 统一错误捕获处理（特别是 409 Conflict、507 Insufficient Storage 与 审计拒绝记录）
   router.use((err, req, res, next) => {

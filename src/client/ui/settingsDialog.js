@@ -117,6 +117,46 @@ export async function showSettingsDialog({ api, autoSyncEngine = null, onUpdated
           </div>
         </div>
       </div>
+
+      <!-- 3. 外部存储镜像与灾备配置 (需要管理员权限) -->
+      <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px 14px;">
+        <div style="font-size:12.5px; font-weight:600; color:#58a6ff; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+          <i class="fa-solid fa-hard-drive" style="font-size:12px;"></i>
+          <span>外部存储镜像与容灾 (管理员)</span>
+        </div>
+
+        <!-- 本地/NAS 路径镜像 -->
+        <div style="padding-bottom:10px; border-bottom:1px dashed rgba(255,255,255,0.06);">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; color:#c9d1d9; user-select:none; margin-bottom:6px;">
+            <input id="cfgsync-conf-localpath-enabled" type="checkbox" style="accent-color:#1890ff; width:15px; height:15px; cursor:pointer;" />
+            <span style="font-weight:500; color:#e6edf3;">启用本地挂载盘 / SMB 路径异步镜像 (LocalPath)</span>
+          </label>
+          <div style="margin-left:24px;">
+            <input id="cfgsync-conf-localpath" type="text" placeholder="挂载绝对路径，如 /mnt/nas/backups" style="width:100%; box-sizing:border-box; padding:5px 8px; font-size:11.5px; border-radius:5px; border:1px solid rgba(255,255,255,0.18); background:#12151d; color:#e6edf3; outline:none;" />
+            <div style="font-size:10.5px; color:#d29922; line-height:1.4; margin-top:4px;">
+              ⚠️ <b>Docker 容器提示</b>：必须填写容器内映射绝对路径（如 <code>/app/data/backups</code>），不可填写宿主机未映射物理路径。
+            </div>
+          </div>
+        </div>
+
+        <!-- WebDAV 远程网盘镜像 -->
+        <div style="margin-top:10px;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; color:#c9d1d9; user-select:none; margin-bottom:6px;">
+            <input id="cfgsync-conf-webdav-enabled" type="checkbox" style="accent-color:#1890ff; width:15px; height:15px; cursor:pointer;" />
+            <span style="font-weight:500; color:#e6edf3;">启用 WebDAV 远程网盘镜像 (坚果云 / 阿里盘 / Nextcloud)</span>
+          </label>
+          <div style="margin-left:24px; display:flex; flex-direction:column; gap:6px;">
+            <input id="cfgsync-conf-webdav-url" type="text" placeholder="WebDAV 服务端 URL (如 https://dav.example.com/dav/)" style="width:100%; box-sizing:border-box; padding:5px 8px; font-size:11.5px; border-radius:5px; border:1px solid rgba(255,255,255,0.18); background:#12151d; color:#e6edf3; outline:none;" />
+            <div style="display:flex; gap:8px;">
+              <input id="cfgsync-conf-webdav-username" type="text" placeholder="WebDAV 用户名" style="flex:1; box-sizing:border-box; padding:5px 8px; font-size:11.5px; border-radius:5px; border:1px solid rgba(255,255,255,0.18); background:#12151d; color:#e6edf3; outline:none;" />
+              <input id="cfgsync-conf-webdav-password" type="password" placeholder="密码 (留空保留原密码)" style="flex:1; box-sizing:border-box; padding:5px 8px; font-size:11.5px; border-radius:5px; border:1px solid rgba(255,255,255,0.18); background:#12151d; color:#e6edf3; outline:none;" />
+            </div>
+            <div style="font-size:10.5px; color:#8b949e; line-height:1.3;">
+              外部存储驱动仅在后台异步镜像版本快照，网络超时或断连绝对不阻断本地备份。
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div style="display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-top:18px;">
@@ -157,6 +197,13 @@ export async function showSettingsDialog({ api, autoSyncEngine = null, onUpdated
   const confAllowSettings = modal.querySelector('#cfgsync-conf-allow-settings');
   const confExcludeHeavy = modal.querySelector('#cfgsync-conf-exclude-heavy');
   const confMaxVersions = modal.querySelector('#cfgsync-conf-max-versions');
+
+  const confLocalPathEnabled = modal.querySelector('#cfgsync-conf-localpath-enabled');
+  const confLocalPath = modal.querySelector('#cfgsync-conf-localpath');
+  const confWebDavEnabled = modal.querySelector('#cfgsync-conf-webdav-enabled');
+  const confWebDavUrl = modal.querySelector('#cfgsync-conf-webdav-url');
+  const confWebDavUsername = modal.querySelector('#cfgsync-conf-webdav-username');
+  const confWebDavPassword = modal.querySelector('#cfgsync-conf-webdav-password');
 
   // 初始化本机偏好
   if (typeof localStorage !== 'undefined') {
@@ -266,12 +313,27 @@ export async function showSettingsDialog({ api, autoSyncEngine = null, onUpdated
       confExcludeHeavy.disabled = true;
       confMaxVersions.disabled = true;
       confMaxVersions.style.opacity = '0.6';
+
+      confLocalPathEnabled.disabled = true;
+      confLocalPath.disabled = true;
+      confWebDavEnabled.disabled = true;
+      confWebDavUrl.disabled = true;
+      confWebDavUsername.disabled = true;
+      confWebDavPassword.disabled = true;
+
       saveBtn.style.display = 'none';
     }
 
     confAllowSettings.checked = Boolean(conf.allowSettingsSharing);
     confExcludeHeavy.checked = conf.excludeHeavyExtensions !== false;
     confMaxVersions.value = conf.maxVersions || 20;
+
+    confLocalPathEnabled.checked = Boolean(conf.localPathEnabled);
+    confLocalPath.value = conf.localPath || '';
+    confWebDavEnabled.checked = Boolean(conf.webdavEnabled);
+    confWebDavUrl.value = conf.webdavUrl || '';
+    confWebDavUsername.value = conf.webdavUsername || '';
+    confWebDavPassword.value = '';
 
     loadingEl.style.display = 'none';
     bodyEl.style.display = 'flex';
@@ -284,7 +346,15 @@ export async function showSettingsDialog({ api, autoSyncEngine = null, onUpdated
           allowSettingsSharing: confAllowSettings.checked,
           excludeHeavyExtensions: confExcludeHeavy.checked,
           maxVersions: Number(confMaxVersions.value) || 20,
+          localPathEnabled: confLocalPathEnabled.checked,
+          localPath: confLocalPath.value.trim(),
+          webdavEnabled: confWebDavEnabled.checked,
+          webdavUrl: confWebDavUrl.value.trim(),
+          webdavUsername: confWebDavUsername.value.trim(),
         };
+        if (confWebDavPassword.value) {
+          payload.webdavPassword = confWebDavPassword.value;
+        }
         await api.updateConfig(payload);
         if (onUpdated) await onUpdated();
         close();

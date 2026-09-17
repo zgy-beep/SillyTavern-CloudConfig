@@ -75,19 +75,25 @@ export class StorageMirrorService {
   }
 
   /**
-   * 检查所有启用的外部驱动健康状态
+   * 检查所有启用的外部驱动健康状态（带超时保护，绝不阻塞事件循环）
+   * @param {number} [timeoutMs=3000]
    */
-  async checkHealth() {
+  async checkHealth(timeoutMs = 3000) {
     this.refreshConfig();
-    const health = {
-      local: this.localDriver.enabled
-        ? { enabled: true, ...(await this.localDriver.checkHealth()) }
-        : { enabled: false, healthy: true },
-      webdav: this.webdavDriver.enabled
-        ? { enabled: true, ...(await this.webdavDriver.checkHealth()) }
-        : { enabled: false, healthy: true },
+    const localHealth = this.localDriver.enabled
+      ? await this.localDriver.checkHealth(timeoutMs).catch(err => ({ healthy: false, error: err.message }))
+      : { enabled: false, healthy: true };
+
+    const webdavHealth = this.webdavDriver.enabled
+      ? await this.webdavDriver.checkHealth(timeoutMs).catch(err => ({ healthy: false, error: err.message }))
+      : { enabled: false, healthy: true };
+
+    return {
+      healthy: (!this.localDriver.enabled || localHealth.healthy) && (!this.webdavDriver.enabled || webdavHealth.healthy),
+      local: { enabled: this.localDriver.enabled, ...localHealth },
+      webdav: { enabled: this.webdavDriver.enabled, ...webdavHealth },
     };
-    return health;
   }
 }
+
 
