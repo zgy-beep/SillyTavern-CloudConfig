@@ -448,4 +448,63 @@ test('Phase 6 Milestone 1: 数据外置、一致性迁移与白名单诊断包 (
       await fsPromises.rm(tempBaseDir, { recursive: true, force: true });
     }
   });
+
+  await t.test('13. P6-R3: 老目录残留自动清理 (0 字节空库与杂散 cfgsync/ 子目录) 且 Fast-Path 保持生效', async () => {
+    const tempBaseDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'cfgsync_m1_13_'));
+    try {
+      const pluginDir = path.join(tempBaseDir, 'plugin');
+      const oldDataDir = path.join(pluginDir, 'data');
+      await fsPromises.mkdir(oldDataDir, { recursive: true });
+
+      const targetDataRoot = path.join(tempBaseDir, 'st_data', 'cfgsync');
+      await fsPromises.mkdir(targetDataRoot, { recursive: true });
+
+      // 目标位置已存在一个有效非空库
+      const targetDbPath = path.join(targetDataRoot, 'cfgsync.sqlite');
+      const validDb = new DatabaseSync(targetDbPath);
+      validDb.exec("CREATE TABLE dummy (id INTEGER); INSERT INTO dummy VALUES (1);");
+      validDb.close();
+
+      // 模拟已存在 .migrated_to 标记文件 (已完成过迁移的部署)
+      const oldMarkerPath = path.join(oldDataDir, '.migrated_to');
+      await fsPromises.writeFile(oldMarkerPath, JSON.stringify({
+        migratedTo: targetDataRoot,
+        migratedAt: Date.now(),
+      }));
+
+      // 模拟第三方脚本在老目录下误建的 0 字节空库和空 wal
+      const oldDbPath = path.join(oldDataDir, 'cfgsync.sqlite');
+      await fsPromises.writeFile(oldDbPath, Buffer.alloc(0));
+      await fsPromises.writeFile(`${oldDbPath}-wal`, Buffer.alloc(0));
+
+      // 模拟第三方脚本在老目录下误建的杂散 cfgsync/ 子目录及文件
+      const straySubDir = path.join(oldDataDir, 'cfgsync');
+      await fsPromises.mkdir(straySubDir, { recursive: true });
+      await fsPromises.writeFile(path.join(straySubDir, 'garbage.tmp'), 'junk');
+
+      // 启动 migrateIfNeeded
+      const res = await MigrationService.migrateIfNeeded({
+        pluginDir,
+        targetDataRoot,
+      });
+
+      // 1. 验证命中 Fast-Path
+      assert.equal(res.success, true);
+      assert.equal(res.skipped, true);
+      assert.equal(res.reason, 'already_migrated_marker');
+
+      // 2. 验证 0 字节库和 0 字节 wal 已被彻底清除
+      assert.equal(fs.existsSync(oldDbPath), false, '0 字节的 cfgsync.sqlite 必须被彻底清理');
+      assert.equal(fs.existsSync(`${oldDbPath}-wal`), false, '0 字节的 -wal 文件必须被彻底清理');
+
+      // 3. 验证杂散 cfgsync/ 子目录已被彻底清除
+      assert.equal(fs.existsSync(straySubDir), false, '老目录下的杂散 cfgsync/ 子目录必须被彻底清理');
+
+      // 4. 验证标记文件与有效目标库完好无损
+      assert.equal(fs.existsSync(oldMarkerPath), true, '.migrated_to 标记文件必须完好保留');
+      assert.equal(fs.existsSync(targetDbPath), true, '目标库必须完好保留');
+    } finally {
+      await fsPromises.rm(tempBaseDir, { recursive: true, force: true });
+    }
+  });
 });

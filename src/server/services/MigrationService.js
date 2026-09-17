@@ -30,6 +30,66 @@ export class MigrationService {
   }
 
   /**
+   * 清理老目录残留杂散物 (P6-R3)
+   * 1. 宿主机或第三方启动脚本在老目录误建的 0 字节空库 (cfgsync.sqlite / -wal / -shm)
+   * 2. 误建在老目录下的杂散 cfgsync/ 子目录 (<pluginDir>/data/cfgsync/)
+   * 保证安全：只有当目标外置库已存在且有效 (size > 0) 时，才清理老目录下的 0 字节空库
+   * @param {string} oldDataDir
+   * @param {string} activeTargetRoot
+   */
+  static cleanStrayLegacyArtifacts(oldDataDir, activeTargetRoot) {
+    if (!oldDataDir || !activeTargetRoot) return;
+    try {
+      if (!fs.existsSync(oldDataDir)) return;
+      const targetDbPath = path.join(activeTargetRoot, 'cfgsync.sqlite');
+      if (!fs.existsSync(targetDbPath)) return;
+
+      // 确认目标库是有效的非空文件
+      const targetStats = fs.statSync(targetDbPath);
+      if (targetStats.size <= 0) return;
+
+      // 1. 清理 0 字节老库及关联文件 (宿主机/第三方脚本误建)
+      const oldDbPath = path.join(oldDataDir, 'cfgsync.sqlite');
+      if (fs.existsSync(oldDbPath)) {
+        try {
+          const stats = fs.statSync(oldDbPath);
+          if (stats.size === 0) {
+            fs.unlinkSync(oldDbPath);
+            console.log('[cfgsync:migration] 已自动清理老目录残留的 0 字节空库:', oldDbPath);
+          }
+        } catch {}
+      }
+      for (const suffix of ['-wal', '-shm']) {
+        const strayFile = `${oldDbPath}${suffix}`;
+        if (fs.existsSync(strayFile)) {
+          try {
+            const stats = fs.statSync(strayFile);
+            if (stats.size === 0) {
+              fs.unlinkSync(strayFile);
+            }
+          } catch {}
+        }
+      }
+
+      // 2. 清理老目录下的杂散 cfgsync/ 子目录 (如 <ST>/plugins/cfgsync/data/cfgsync/)
+      const straySubDir = path.join(oldDataDir, 'cfgsync');
+      if (fs.existsSync(straySubDir)) {
+        // 安全防误删：检查 straySubDir 是否就是目标 activeTargetRoot
+        if (path.resolve(straySubDir) !== path.resolve(activeTargetRoot)) {
+          try {
+            fs.rmSync(straySubDir, { recursive: true, force: true });
+            console.log('[cfgsync:migration] 已自动清理老目录残留的杂散子目录:', straySubDir);
+          } catch (e) {
+            console.warn('[cfgsync:migration] 清理杂散子目录警告:', e.message);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[cfgsync:migration] cleanStrayLegacyArtifacts 异常捕获:', e.message);
+    }
+  }
+
+  /**
    * 执行数据库与密钥由老路径至新全局数据根的平滑迁移 (M1, N-6 ~ N-8, N-11 ~ N-13)
    * 必须在任何业务 DatabaseClient 实例创建之前调用
    * 
@@ -59,7 +119,10 @@ export class MigrationService {
     const targetConfigPath = path.join(activeTargetRoot, 'cfgsync_config.json');
     const oldMarkerPath = path.join(oldDataDir, '.migrated_to');
 
-    // 0. P6-R2: 快速通道——若老目录已存在迁移成功标记且目标库就绪，立即放行，永不重复仲裁
+    // 0. P6-R3: 在任何 Fast-Path 或仲裁判定前，先清理老目录残留杂散物 (0 字节库与杂散 cfgsync/ 子目录)
+    this.cleanStrayLegacyArtifacts(oldDataDir, activeTargetRoot);
+
+    // 0.1 P6-R2: 快速通道——若老目录已存在迁移成功标记且目标库就绪，立即放行，永不重复仲裁
     if (fs.existsSync(oldMarkerPath) && fs.existsSync(targetDbPath)) {
       return {
         success: true,
@@ -69,16 +132,6 @@ export class MigrationService {
         skipped: true,
         reason: 'already_migrated_marker',
       };
-    }
-
-    // 清理老目录可能被第三方脚本误建的 0 字节空库 (P6-R2)
-    if (fs.existsSync(oldDbPath) && fs.existsSync(targetDbPath)) {
-      try {
-        const stats = fs.statSync(oldDbPath);
-        if (stats.size === 0) {
-          fs.unlinkSync(oldDbPath);
-        }
-      } catch {}
     }
 
     // 1. 若目标目录与老目录完全一致，直接放行
@@ -253,11 +306,8 @@ export class MigrationService {
         const oldBakRename = `${oldDbPath}.bak-migrated-${timestamp}`;
         await fsPromises.rename(oldDbPath, oldBakRename).catch(() => {});
 
-        // 清理老目录下误建的杂散 data/cfgsync 子目录 (P6-R3)
-        const straySubDir = path.join(oldDataDir, 'cfgsync');
-        if (fs.existsSync(straySubDir)) {
-          await fsPromises.rm(straySubDir, { recursive: true, force: true }).catch(() => {});
-        }
+        // 统一清理老目录下残留杂散物 (P6-R3)
+        this.cleanStrayLegacyArtifacts(oldDataDir, activeTargetRoot);
       } catch (e) {
         console.warn('[cfgsync:migration] 写入迁移标记警告:', e.message);
       }
@@ -460,6 +510,9 @@ export class MigrationService {
           arbitratedAt: Date.now(),
           winner: 'target',
         }, null, 2), 'utf8');
+
+        // 统一清理老目录下残留杂散物 (P6-R3)
+        this.cleanStrayLegacyArtifacts(oldDataDir, activeTargetRoot);
       } catch {}
 
       console.log(`[cfgsync:migration] 仲裁结果: 目标位置数据库更全，启用 ${targetDbPath}，老库已冷备为 ${oldBakPath}`);
