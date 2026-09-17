@@ -181,8 +181,8 @@ export function formatChatJsonl(metadata, messages) {
  * 落实 Phase 5.2 全量技术规格 (N-1 ~ N-4, N-10, N-11, TC13 ~ TC20, TC23, TC24)
  */
 export class ChatAdapter extends ConfigAdapter {
-  constructor() {
-    super('chat', MergeStrategy.APPEND_MERGE, ReloadStrategy.CHAT);
+  constructor(contentType = 'chat') {
+    super(contentType, MergeStrategy.APPEND_MERGE, ReloadStrategy.CHAT);
   }
 
   resolveChatDirs(directories) {

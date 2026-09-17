@@ -73,6 +73,15 @@ export class CloudConfigPanel {
           </div>
           <span style="font-size:11.5px; opacity:0.75; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">账号: <strong class="cfgsync-account-label" style="color:#69c0ff;">${this.accountHandle}</strong></span>
         </div>
+        <div class="cfgsync-filter-bar" style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
+          <div style="position:relative; flex:1;">
+            <input id="cfgsync-search-input" type="text" placeholder="搜索配置项名称..." style="width:100%; box-sizing:border-box; height:24px; font-size:11px; padding:2px 22px 2px 8px; border-radius:4px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.15); color:#fff;" />
+            <i class="fa-solid fa-magnifying-glass" style="position:absolute; right:7px; top:6px; font-size:10px; opacity:0.5; pointer-events:none;"></i>
+          </div>
+          <select id="cfgsync-category-filter" style="height:24px; font-size:11px; padding:0 4px; border-radius:4px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.15); color:#fff; max-width:110px;">
+            <option value="">全部分类</option>
+          </select>
+        </div>
         <div id="cfgsync-items-loading" style="text-align:center; padding:16px; font-size:12px; opacity:0.7;">正在加载配置...</div>
         <div id="cfgsync-items-tree"></div>
       </div>
@@ -84,6 +93,60 @@ export class CloudConfigPanel {
     this.bindClaim();
     this.bindSettings();
     this.bindDashboard();
+    this.bindSearchFilter();
+  }
+
+  bindSearchFilter() {
+    const searchInput = this.container.querySelector('#cfgsync-search-input');
+    const catSelect = this.container.querySelector('#cfgsync-category-filter');
+    if (!searchInput || !catSelect) return;
+
+    const applyFilter = () => {
+      const q = (searchInput.value || '').trim().toLowerCase();
+      const selectedCat = catSelect.value;
+      const treeEl = this.container.querySelector('#cfgsync-items-tree');
+      if (!treeEl) return;
+
+      const drawers = treeEl.querySelectorAll('.cfgsync-group-drawer');
+      drawers.forEach(drawer => {
+        const ct = drawer.dataset.contentType;
+        if (selectedCat && ct !== selectedCat) {
+          drawer.style.display = 'none';
+          return;
+        }
+
+        const rows = drawer.querySelectorAll('.cfgsync-item-row');
+        let visibleCount = 0;
+        rows.forEach(row => {
+          const name = (row.dataset.displayName || row.querySelector('.cfgsync-row-name')?.textContent || '').toLowerCase();
+          const ref = (row.querySelector('.cfgsync-row-ref')?.textContent || '').toLowerCase();
+          const match = !q || name.includes(q) || ref.includes(q);
+          row.style.display = match ? 'flex' : 'none';
+          if (match) visibleCount++;
+        });
+
+        if (q) {
+          drawer.style.display = visibleCount > 0 ? 'block' : 'none';
+          const content = drawer.querySelector('.cfgsync-drawer-content');
+          if (content && visibleCount > 0) {
+            content.style.display = 'block';
+            const icon = drawer.querySelector('.inline-drawer-icon');
+            if (icon) { icon.classList.remove('down'); icon.classList.add('up'); }
+          }
+        } else {
+          drawer.style.display = 'block';
+        }
+      });
+    };
+
+    if (!searchInput.dataset.bound) {
+      searchInput.dataset.bound = 'true';
+      searchInput.addEventListener('input', applyFilter);
+    }
+    if (!catSelect.dataset.bound) {
+      catSelect.dataset.bound = 'true';
+      catSelect.addEventListener('change', applyFilter);
+    }
   }
 
   bindDashboard() {
@@ -325,6 +388,12 @@ export class CloudConfigPanel {
         'character': '角色卡',
         'chat': '会话记录',
         'theme': '主题风格',
+        'background': '聊天背景',
+        'persona': '用户人设',
+        'avatar': '人设头像',
+        'group': '群组设定',
+        'group_chat': '群聊记录',
+        'sprites': '表情贴图包',
         'openai_preset': 'OpenAI 预设',
         'textgen_preset': 'TextGen 预设',
         'novel_preset': 'NovelAI 预设',
@@ -335,6 +404,17 @@ export class CloudConfigPanel {
         'sysprompt': '系统提示词预设',
         'quick_replies': '快捷回复',
       };
+
+      // 动态更新分类下拉筛选选项
+      const catSelect = this.container.querySelector('#cfgsync-category-filter');
+      if (catSelect && catSelect.children.length <= 1) {
+        for (const ct of allActiveTypes) {
+          const opt = document.createElement('option');
+          opt.value = ct;
+          opt.textContent = ctNameMap[ct] || ct;
+          catSelect.appendChild(opt);
+        }
+      }
 
       for (const ct of allActiveTypes) {
         // 1. 获取本地配置项
@@ -971,6 +1051,18 @@ export class CloudConfigPanel {
       iconOrAvatarHtml = `<i class="fa-solid fa-palette" style="font-size:12px; color:#d48806; flex-shrink:0;"></i>`;
     } else if (contentType === 'chat') {
       iconOrAvatarHtml = `<i class="fa-solid fa-comments" style="font-size:11px; color:#a371f7; flex-shrink:0;"></i>`;
+    } else if (contentType === 'group_chat') {
+      iconOrAvatarHtml = `<i class="fa-solid fa-users-line" style="font-size:11px; color:#ff7875; flex-shrink:0;"></i>`;
+    } else if (contentType === 'background') {
+      iconOrAvatarHtml = `<i class="fa-solid fa-image" style="font-size:11px; color:#ff7a45; flex-shrink:0;"></i>`;
+    } else if (contentType === 'persona') {
+      iconOrAvatarHtml = `<i class="fa-solid fa-id-badge" style="font-size:11px; color:#36cfc9; flex-shrink:0;"></i>`;
+    } else if (contentType === 'avatar') {
+      iconOrAvatarHtml = `<i class="fa-solid fa-circle-user" style="font-size:11px; color:#9254de; flex-shrink:0;"></i>`;
+    } else if (contentType === 'group') {
+      iconOrAvatarHtml = `<i class="fa-solid fa-users" style="font-size:11px; color:#597ef7; flex-shrink:0;"></i>`;
+    } else if (contentType === 'sprites') {
+      iconOrAvatarHtml = `<i class="fa-solid fa-masks-theater" style="font-size:11px; color:#ffc53d; flex-shrink:0;"></i>`;
     } else if (contentType === 'settings') {
       iconOrAvatarHtml = `<i class="fa-solid fa-sliders" style="font-size:11px; color:#79c0ff; flex-shrink:0;"></i>`;
     } else if (contentType === 'world') {
@@ -985,7 +1077,7 @@ export class CloudConfigPanel {
         <div style="min-width:0; flex:1; overflow:hidden; display:flex; flex-direction:column; gap:1px;">
           <div title="${item.displayName}" style="font-size:12.5px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? '#f0f6fc' : '#c9d1d9'}; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:flex; align-items:center; gap:6px;">
             ${iconOrAvatarHtml}
-            ${contentType === 'chat' && (item.characterName || (item.sourceRef && item.sourceRef.includes('/'))) ? `
+            ${(contentType === 'chat' || contentType === 'group_chat') && (item.characterName || (item.sourceRef && item.sourceRef.includes('/'))) ? `
               <span class="cfgsync-chat-char-tag" style="background:rgba(88,166,255,0.18); color:#58a6ff; font-size:10.5px; padding:1px 5px; border-radius:3px; border:1px solid rgba(88,166,255,0.3); font-weight:normal; flex-shrink:0;">${item.characterName || item.sourceRef.split('/')[0]}</span>
               <span class="cfgsync-row-name" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.chatName || (item.displayName && item.displayName.includes(' / ') ? item.displayName.split(' / ').slice(1).join(' / ') : item.displayName)}</span>
             ` : `
@@ -1002,10 +1094,12 @@ export class CloudConfigPanel {
         <button class="cfgsync-push-btn menu_button" title="${hasCloud ? '推送到云端 (上传新快照覆盖云端)' : '未同步：立即推送到云端生成首个快照'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; ${!row._existsLocally ? 'opacity:0.25 !important; pointer-events:none;' : (!hasCloud ? 'opacity:1 !important; background:rgba(31,111,235,0.22) !important; border:1px solid rgba(88,166,255,0.5) !important; color:#58a6ff !important;' : 'opacity:0.9;')}">
           <i class="fa-solid fa-cloud-arrow-up"></i>
         </button>
-        ${contentType !== 'settings' && contentType !== 'chat' ? `
+        ${contentType !== 'settings' && contentType !== 'chat' && contentType !== 'group_chat' ? `
         <button class="cfgsync-share-btn menu_button" title="${hasCloud ? '分享配置 (生成邀请码 / 设为公开)' : '尚未推送到云端，无法分享'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'opacity:0.9; cursor:pointer !important;'}">
           <i class="fa-solid fa-share-nodes"></i>
         </button>
+        ` : ''}
+        ${contentType !== 'settings' ? `
         <button class="cfgsync-delete-btn menu_button" title="删除配置 (云端备份 / 本地文件)" style="white-space:nowrap !important; width:24px !important; min-width:24px !important; max-width:24px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; background:transparent; border:1px solid rgba(255,255,255,0.12); color:rgba(255,255,255,0.4); transition:all 0.15s ease;">
           <i class="fa-regular fa-trash-can"></i>
         </button>

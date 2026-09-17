@@ -110,6 +110,7 @@ export function createPluginRouter({
         SELECT DISTINCT owner_handle FROM share_grants
         WHERE (grantee_handle = :requester OR (is_public = 1 AND grantee_handle IS NULL))
           AND content_type = :ct
+          AND content_type <> 'group_chat'
           AND (content_type <> 'settings' OR :allowSettingsSharing = 1)
           AND status = 'active'
           AND (expires_at IS NULL OR expires_at > :now)
@@ -123,6 +124,7 @@ export function createPluginRouter({
         UNION
         SELECT DISTINCT owner_handle FROM share_grants
         WHERE (grantee_handle = :requester OR (is_public = 1 AND grantee_handle IS NULL))
+          AND content_type <> 'group_chat'
           AND (content_type <> 'settings' OR :allowSettingsSharing = 1)
           AND status = 'active'
           AND (expires_at IS NULL OR expires_at > :now)
@@ -180,12 +182,14 @@ export function createPluginRouter({
           AND (
             c.owner_handle = :requester
             OR (
-              (:ct <> 'settings' OR :allowSettingsSharing = 1)
+              c.content_type <> 'group_chat'
+              AND (:ct <> 'settings' OR :allowSettingsSharing = 1)
               AND EXISTS (
                 SELECT 1 FROM share_grants g
                 WHERE g.owner_handle = c.owner_handle
                   AND (g.grantee_handle = :requester OR (g.is_public = 1 AND g.grantee_handle IS NULL))
                   AND g.content_type = :ct
+                  AND g.content_type <> 'group_chat'
                   AND (g.content_type <> 'settings' OR :allowSettingsSharing = 1)
                   AND g.status = 'active'
                   AND (g.expires_at IS NULL OR g.expires_at > :now)

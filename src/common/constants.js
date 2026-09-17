@@ -36,9 +36,9 @@ export const P1ContentTypes = [
 
 /**
  * 跨账号禁止共享的敏感类别黑名单
- * settings 包含 API 密钥、密码等敏感信息，任何情况下禁止跨账号读取或共享
+ * settings 与聊天记录（含 group_chat）坚决禁止跨账号共享，硬拒 400
  */
-export const NON_SHAREABLE_CONTENT_TYPES = Object.freeze(['settings', 'chat']);
+export const NON_SHAREABLE_CONTENT_TYPES = Object.freeze(['settings', 'chat', 'group_chat']);
 
 /**
  * 允许跨账号共享的类别白名单
@@ -57,6 +57,8 @@ export const SHAREABLE_CONTENT_TYPES = Object.freeze([
   'quick_replies',
   'background',
   'avatar',
+  'persona',
+  'group',
   'sprites',
   'theme',
   'workflow',

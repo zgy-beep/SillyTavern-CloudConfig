@@ -34,6 +34,9 @@ export class ShareService {
   }
 
   isCategoryShareable(contentType) {
+    if (contentType === 'group_chat') {
+      return false; // 坚决禁止跨账号共享，400 硬拒 (铁律)
+    }
     if (contentType === 'settings') {
       return Boolean(this.configService?.get('allowSettingsSharing'));
     }

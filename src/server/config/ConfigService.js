@@ -8,8 +8,13 @@ export const DEFAULT_CONFIG = Object.freeze({
   maxVersionsByType: {
     character: 5,              // 二进制角色卡（单卡 ~3.1MB，5 版约 15MB）
     theme: 5,                  // 主题配置
-    background: 3,             // 背景图
-    chat: 5,                   // 聊天记录
+    background: 3,             // 聊天背景（3 版）
+    avatar: 5,                 // 人设头像（5 版）
+    persona: 20,               // 用户人设（20 版）
+    group: 20,                 // 群组定义（20 版）
+    group_chat: 5,             // 群聊历史（5 版）
+    sprites: 3,                // 表情贴图包（3 版）
+    chat: 5,                   // 聊天记录（5 版）
   },
   excludeHeavyExtensions: true, // 默认排除酒馆助手巨大缓存 (~4.7MB)
   autoSyncEnabled: false,      // 客户端静默自动同步默认关闭 (P6-4, 保守默认)
