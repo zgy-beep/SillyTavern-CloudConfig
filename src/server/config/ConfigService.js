@@ -11,7 +11,10 @@ export const DEFAULT_CONFIG = Object.freeze({
     background: 3,             // 背景图
     chat: 5,                   // 聊天记录
   },
-  excludeHeavyExtensions: true // 默认排除酒馆助手巨大缓存 (~4.7MB)
+  excludeHeavyExtensions: true, // 默认排除酒馆助手巨大缓存 (~4.7MB)
+  autoSyncEnabled: false,      // 客户端静默自动同步默认关闭 (P6-4, 保守默认)
+  webdavEnabled: false,        // 外部 WebDAV 默认关闭 (保守默认)
+  localPathEnabled: false,     // 外部 LocalPath 默认关闭 (保守默认)
 });
 
 /**

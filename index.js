@@ -13,6 +13,8 @@ import { AuditService } from './src/server/services/AuditService.js';
 import { ShareService } from './src/server/services/ShareService.js';
 import { ConfigService } from './src/server/config/ConfigService.js';
 import { SseService } from './src/server/services/SseService.js';
+import { MigrationService } from './src/server/services/MigrationService.js';
+import { DiagnosticService } from './src/server/services/DiagnosticService.js';
 import { createPluginRouter } from './src/server/routes/router.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -35,8 +37,13 @@ let gcInterval = null;
 export async function init(router) {
   console.log(`[${info.name}] Initializing v${info.version}...`);
 
-  // 1. 初始化 SQLite 数据库
-  const dbPath = path.join(__dirname, 'data', 'cfgsync.sqlite');
+  // 1. 执行数据库与配置平滑迁移 (M1, N-1, N-6, N-7, N-11, N-12)
+  const migrationResult = await MigrationService.migrateIfNeeded({
+    pluginDir: __dirname,
+    stRoot: process.cwd(),
+  });
+  const dataRoot = migrationResult.activeDataRoot;
+  const dbPath = migrationResult.dbPath;
   dbClient = new DatabaseClient(dbPath);
 
   // 2. 初始化核心组件与适配器
@@ -49,15 +56,22 @@ export async function init(router) {
   for (const [key, adapter] of p2Adapters) {
     adapters.set(key, adapter);
   }
-  const configService = new ConfigService(path.join(__dirname, 'data', 'cfgsync_config.json'));
+  const configService = new ConfigService(path.join(dataRoot, 'cfgsync_config.json'));
   const snapshotStore = new SnapshotStore();
   const authService = new AuthorizationService(dbClient, configService);
   const changeBus = new ChangeEventBus(dbClient, configService);
   const auditService = new AuditService(dbClient);
-  const shareService = new ShareService(dbClient, auditService, configService);
+  const shareService = new ShareService(dbClient, auditService, configService, { dataRoot });
   const syncService = new SyncService(dbClient, adapters, snapshotStore, authService, configService);
+  syncService.dataRoot = dataRoot;
 
   const sseService = new SseService({ changeBus, authService, configService });
+  const diagnosticService = new DiagnosticService({
+    dbClient,
+    configService,
+    stRoot: process.cwd(),
+    activeDataRoot: dataRoot,
+  });
 
   // 3. 挂载前端扩展静态资源目录
   const clientDir = path.join(__dirname, 'src', 'client');
@@ -73,6 +87,7 @@ export async function init(router) {
     auditService,
     configService,
     sseService,
+    diagnosticService,
   });
   router.use('/', pluginRouter);
 

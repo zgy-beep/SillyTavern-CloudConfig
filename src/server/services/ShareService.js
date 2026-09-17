@@ -22,7 +22,8 @@ export class ShareService {
     this.db = dbClient;
     this.audit = auditService;
     this.configService = configService;
-    this.serverSecret = options.serverSecret || this.loadOrGenerateSecret(options.secretPath);
+    this.dataRoot = options.dataRoot || null;
+    this.serverSecret = options.serverSecret || this.loadOrGenerateSecret(options.secretPath, this.dataRoot);
 
     // 内存失败限速器
     // 账号维度：5 次/小时；IP 维度：50 次/小时
@@ -45,11 +46,12 @@ export class ShareService {
   /**
    * 加载或初始化持久化 HMAC 密钥
    * @param {string} [customPath]
+   * @param {string} [dataRoot]
    * @returns {string}
    */
-  loadOrGenerateSecret(customPath) {
-    const defaultDir = path.join(process.cwd(), 'data');
-    const secretPath = customPath || process.env.CFGSYNC_SERVER_SECRET_PATH || path.join(defaultDir, '.server_secret');
+  loadOrGenerateSecret(customPath, dataRoot = null) {
+    const targetDir = dataRoot || path.join(process.cwd(), 'data', 'cfgsync');
+    const secretPath = customPath || process.env.CFGSYNC_SERVER_SECRET_PATH || path.join(targetDir, '.server_secret');
 
     if (process.env.CFGSYNC_SERVER_SECRET) {
       return process.env.CFGSYNC_SERVER_SECRET;
@@ -59,6 +61,22 @@ export class ShareService {
       if (fs.existsSync(secretPath)) {
         const secret = fs.readFileSync(secretPath, 'utf8').trim();
         if (secret.length >= 32) return secret;
+      }
+
+      // 检查老路径 fallback (data/.server_secret)
+      const legacyPath = path.join(process.cwd(), 'data', '.server_secret');
+      if (fs.existsSync(legacyPath)) {
+        const secret = fs.readFileSync(legacyPath, 'utf8').trim();
+        if (secret.length >= 32) {
+          // 尝试同步到新路径
+          try {
+            if (!fs.existsSync(path.dirname(secretPath))) {
+              fs.mkdirSync(path.dirname(secretPath), { recursive: true });
+            }
+            fs.writeFileSync(secretPath, secret, { encoding: 'utf8', mode: 0o600 });
+          } catch {}
+          return secret;
+        }
       }
 
       const dir = path.dirname(secretPath);

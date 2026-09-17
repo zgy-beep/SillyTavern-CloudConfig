@@ -4,6 +4,7 @@ import { P0ContentTypes, ContentTypeGroup, Permission } from '../../common/const
 import { ShareService } from '../services/ShareService.js';
 import { AuditService } from '../services/AuditService.js';
 import { SseService } from '../services/SseService.js';
+import { DiagnosticService } from '../services/DiagnosticService.js';
 
 /**
  * 创建 Express 路由
@@ -26,6 +27,7 @@ export function createPluginRouter({
   auditService,
   configService,
   sseService,
+  diagnosticService,
 }) {
   const router = Router();
   const audit = auditService || (syncService?.db ? new AuditService(syncService.db) : null);
@@ -827,6 +829,18 @@ export function createPluginRouter({
       success: true,
       ...result,
     });
+  }));
+
+  // 12. GET /diagnostics (脱敏诊断报告导出, N-4, N-10)
+  router.get('/diagnostics', asyncHandler(async (req, res) => {
+    const diag = diagnosticService || new DiagnosticService({
+      dbClient: syncService?.db,
+      configService,
+      stRoot: process.cwd(),
+      activeDataRoot: syncService?.dataRoot,
+    });
+    const report = diag.generateReport();
+    res.json(report);
   }));
 
   // 统一错误捕获处理（特别是 409 Conflict 与 审计拒绝记录）
