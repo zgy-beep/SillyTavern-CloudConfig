@@ -28,6 +28,7 @@ export class CloudConfigPanel {
     this.autoSyncEngine = autoSyncEngine;
     this.container = null;
     this._refreshing = false;
+    this._allowSettingsSharing = false;
     this.thumbnailCache = new Map();
   }
 
@@ -501,6 +502,7 @@ export class CloudConfigPanel {
         }
       }
       this._isAdmin = Boolean(typeRes.is_admin);
+      this._allowSettingsSharing = Boolean(typeRes.allow_settings_sharing);
 
       // 支持所有已注册并启用的配置类型（核心类型 + P1 纯 JSON 预设）
       const allActiveTypes = typeRes.activeTypes || (typeRes.groups?.P0 || ['settings', 'openai_preset', 'world']);
@@ -1220,8 +1222,8 @@ export class CloudConfigPanel {
         <button class="cfgsync-push-btn menu_button" title="${hasCloud ? '推送到云端 (上传新快照覆盖云端)' : '未同步：立即推送到云端生成首个快照'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; ${!row._existsLocally ? 'opacity:0.25 !important; pointer-events:none;' : (!hasCloud ? 'opacity:1 !important; background:rgba(31,111,235,0.22) !important; border:1px solid rgba(88,166,255,0.5) !important; color:#58a6ff !important;' : 'opacity:0.9;')}">
           <i class="fa-solid fa-cloud-arrow-up"></i>
         </button>
-        ${contentType !== 'settings' && contentType !== 'chat' && contentType !== 'group_chat' ? `
-        <button class="cfgsync-share-btn menu_button" title="${hasCloud ? '分享配置 (生成邀请码 / 设为公开)' : '尚未推送到云端，无法分享'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'opacity:0.9; cursor:pointer !important;'}">
+        ${contentType !== 'chat' && contentType !== 'group_chat' && (contentType !== 'settings' || this._allowSettingsSharing) ? `
+        <button class="cfgsync-share-btn menu_button" title="${hasCloud ? (contentType === 'settings' ? '家庭共享设置 (生成专属邀请码 / 安全注入 API Key)' : '分享配置 (生成邀请码 / 设为公开)') : '尚未推送到云端，无法分享'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'opacity:0.9; cursor:pointer !important;'}">
           <i class="fa-solid fa-share-nodes"></i>
         </button>
         ` : ''}

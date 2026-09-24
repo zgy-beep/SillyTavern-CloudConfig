@@ -100,6 +100,7 @@ export function createPluginRouter({
       activeTypes: Array.from(adapters.keys()),
       current_user: req.authContext.handle,
       is_admin: isAdmin,
+      allow_settings_sharing: Boolean(configService?.get('allowSettingsSharing')),
     });
   });
 
