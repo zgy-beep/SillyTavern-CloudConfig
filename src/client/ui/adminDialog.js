@@ -8,6 +8,7 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
 
   const backdrop = document.createElement('div');
   backdrop.id = 'cfgsync-dashboard-dialog-backdrop';
+  backdrop.className = 'cfgsync-modal-overlay popup';
   backdrop.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
     background: rgba(0,0,0,0.65); z-index: 100000;
@@ -46,15 +47,21 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
   backdrop.appendChild(dialog);
   document.body.appendChild(backdrop);
 
-  const closeDialog = () => {
+  const closeDialog = (e) => {
+    if (e) e.stopPropagation();
     backdrop.remove();
     if (typeof onClose === 'function') onClose();
   };
 
+  ['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].forEach((evt) => {
+    backdrop.addEventListener(evt, (e) => e.stopPropagation());
+  });
+
   dialog.querySelector('#cfgsync-dash-close-x').onclick = closeDialog;
   dialog.querySelector('#cfgsync-dash-close-btn').onclick = closeDialog;
   backdrop.onclick = (e) => {
-    if (e.target === backdrop) closeDialog();
+    e.stopPropagation();
+    if (e.target === backdrop) closeDialog(e);
   };
 
   const renderDashboard = async () => {

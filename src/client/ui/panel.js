@@ -156,10 +156,14 @@ export class CloudConfigPanel {
     if (!searchInput.dataset.bound) {
       searchInput.dataset.bound = 'true';
       searchInput.addEventListener('input', applyFilter);
+      searchInput.addEventListener('mousedown', (e) => e.stopPropagation());
+      searchInput.addEventListener('click', (e) => e.stopPropagation());
     }
     if (!catSelect.dataset.bound) {
       catSelect.dataset.bound = 'true';
       catSelect.addEventListener('change', applyFilter);
+      catSelect.addEventListener('mousedown', (e) => e.stopPropagation());
+      catSelect.addEventListener('click', (e) => e.stopPropagation());
     }
   }
 
@@ -173,6 +177,7 @@ export class CloudConfigPanel {
 
     if (exportBtn && !exportBtn.dataset.bound) {
       exportBtn.dataset.bound = 'true';
+      exportBtn.onmousedown = (e) => e.stopPropagation();
       exportBtn.onclick = async (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -218,6 +223,7 @@ export class CloudConfigPanel {
 
     if (importBtn && fileInput && !importBtn.dataset.bound) {
       importBtn.dataset.bound = 'true';
+      importBtn.onmousedown = (e) => e.stopPropagation();
       importBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -264,6 +270,7 @@ export class CloudConfigPanel {
     if (!dashBtn || dashBtn.dataset.bound) return;
     dashBtn.dataset.bound = 'true';
 
+    dashBtn.onmousedown = (e) => e.stopPropagation();
     dashBtn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -280,6 +287,7 @@ export class CloudConfigPanel {
     if (!settingsBtn || settingsBtn.dataset.bound) return;
     settingsBtn.dataset.bound = 'true';
 
+    settingsBtn.onmousedown = (e) => e.stopPropagation();
     settingsBtn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -297,6 +305,7 @@ export class CloudConfigPanel {
     if (!claimBtn || claimBtn.dataset.bound) return;
     claimBtn.dataset.bound = 'true';
 
+    claimBtn.onmousedown = (e) => e.stopPropagation();
     claimBtn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -312,6 +321,7 @@ export class CloudConfigPanel {
     if (!refreshBtn || refreshBtn.dataset.bound) return;
     refreshBtn.dataset.bound = 'true';
 
+    refreshBtn.onmousedown = (e) => e.stopPropagation();
     refreshBtn.onclick = async (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -330,6 +340,7 @@ export class CloudConfigPanel {
     if (!backupBtn || backupBtn.dataset.bound) return;
     backupBtn.dataset.bound = 'true';
 
+    backupBtn.onmousedown = (e) => e.stopPropagation();
     backupBtn.onclick = async (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -430,6 +441,7 @@ export class CloudConfigPanel {
     toggleAllBtn.dataset.bound = 'true';
 
     let allExpanded = false;
+    toggleAllBtn.onmousedown = (e) => e.stopPropagation();
     toggleAllBtn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -660,6 +672,7 @@ export class CloudConfigPanel {
     const contentEl = groupDrawer.querySelector('.cfgsync-drawer-content');
     const iconEl = groupDrawer.querySelector('.inline-drawer-icon');
 
+    toggleBtn.onmousedown = (e) => e.stopPropagation();
     toggleBtn.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -1040,6 +1053,7 @@ export class CloudConfigPanel {
       if (hasCloud) {
         const historyBtn = badgeContainer.querySelector('.cfgsync-history-badge-btn');
         if (historyBtn) {
+          historyBtn.onmousedown = (e) => e.stopPropagation();
           historyBtn.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -1237,6 +1251,7 @@ export class CloudConfigPanel {
     // 绑定快照历史弹窗事件
     const historyBtn = row.querySelector('.cfgsync-history-badge-btn');
     if (historyBtn) {
+      historyBtn.onmousedown = (e) => e.stopPropagation();
       historyBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1260,6 +1275,7 @@ export class CloudConfigPanel {
 
     // 勾选切换开关
     const toggle = row.querySelector('.cfgsync-toggle');
+    toggle.onmousedown = (e) => e.stopPropagation();
     toggle.onchange = async () => {
       toggle.disabled = true;
       try {
@@ -1284,7 +1300,10 @@ export class CloudConfigPanel {
 
     // 手动推送到云端（支持时间快照、自定义备注、缓存精简与网盘式直传）
     const pushBtn = row.querySelector('.cfgsync-push-btn');
-    pushBtn.onclick = () => {
+    pushBtn.onmousedown = (e) => e.stopPropagation();
+    pushBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       showPushDialog({
         displayName: item.displayName,
         contentType,
@@ -1345,6 +1364,7 @@ export class CloudConfigPanel {
     // 分享配置（专属邀请码 / 全服公开）
     const shareBtn = row.querySelector('.cfgsync-share-btn');
     if (shareBtn) {
+      shareBtn.onmousedown = (e) => e.stopPropagation();
       shareBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1371,6 +1391,7 @@ export class CloudConfigPanel {
         deleteBtn.style.borderColor = 'rgba(255,255,255,0.12)';
         deleteBtn.style.background = 'transparent';
       };
+      deleteBtn.onmousedown = (e) => e.stopPropagation();
       deleteBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1435,7 +1456,10 @@ export class CloudConfigPanel {
     `;
     const retryBtn = this.container.querySelector('.cfgsync-retry-btn');
     if (retryBtn) {
-      retryBtn.onclick = () => {
+      retryBtn.onmousedown = (e) => e.stopPropagation();
+      retryBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         this.container.innerHTML = '';
         this.refresh();
       };

@@ -69,7 +69,7 @@ export async function initExtension() {
 
   // 4. 注册并挂载到 ST 扩展设置侧边栏抽屉 (#extensions_settings)
   const mountDrawer = () => {
-    if (document.querySelector('#cfgsync-drawer-container')) return true;
+    if (document.querySelector('#cfgsync-extension-container')) return true;
     const drawer = document.querySelector('#extensions_settings');
     if (!drawer) return false;
 

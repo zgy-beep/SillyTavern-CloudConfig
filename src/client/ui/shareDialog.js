@@ -10,7 +10,7 @@
  */
 export function showClaimDialog({ api, onClaimed }) {
   const overlay = document.createElement('div');
-  overlay.className = 'cfgsync-modal-overlay';
+  overlay.className = 'cfgsync-modal-overlay popup';
   overlay.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
     background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
@@ -65,9 +65,22 @@ export function showClaimDialog({ api, onClaimed }) {
     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
   };
 
-  overlay.onclick = (e) => { if (e.target === overlay) close(); };
-  modal.querySelector('#cfgsync-claim-close-x').onclick = close;
-  modal.querySelector('#cfgsync-claim-cancel-btn').onclick = close;
+  ['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].forEach((evt) => {
+    overlay.addEventListener(evt, (e) => e.stopPropagation());
+  });
+
+  overlay.onclick = (e) => {
+    e.stopPropagation();
+    if (e.target === overlay) close();
+  };
+  modal.querySelector('#cfgsync-claim-close-x').onclick = (e) => {
+    e.stopPropagation();
+    close();
+  };
+  modal.querySelector('#cfgsync-claim-cancel-btn').onclick = (e) => {
+    e.stopPropagation();
+    close();
+  };
 
   const input = modal.querySelector('#cfgsync-claim-code-input');
   const errorEl = modal.querySelector('#cfgsync-claim-error');
@@ -138,7 +151,7 @@ export function showClaimDialog({ api, onClaimed }) {
  */
 export function showShareDialog({ api, contentType, itemUid, displayName, onUpdated }) {
   const overlay = document.createElement('div');
-  overlay.className = 'cfgsync-modal-overlay';
+  overlay.className = 'cfgsync-modal-overlay popup';
   overlay.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
     background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
@@ -238,9 +251,22 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
     if (onUpdated) onUpdated();
   };
 
-  overlay.onclick = (e) => { if (e.target === overlay) close(); };
-  modal.querySelector('#cfgsync-share-close-x').onclick = close;
-  modal.querySelector('#cfgsync-share-close-btn').onclick = close;
+  ['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].forEach((evt) => {
+    overlay.addEventListener(evt, (e) => e.stopPropagation());
+  });
+
+  overlay.onclick = (e) => {
+    e.stopPropagation();
+    if (e.target === overlay) close();
+  };
+  modal.querySelector('#cfgsync-share-close-x').onclick = (e) => {
+    e.stopPropagation();
+    close();
+  };
+  modal.querySelector('#cfgsync-share-close-btn').onclick = (e) => {
+    e.stopPropagation();
+    close();
+  };
 
   // 生成邀请码
   const genBtn = modal.querySelector('#cfgsync-gen-code-btn');

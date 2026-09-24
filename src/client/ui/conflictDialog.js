@@ -7,7 +7,7 @@ export function showConflictDialog({
   onResolve,
 }) {
   const overlay = document.createElement('div');
-  overlay.className = 'cfgsync-modal-overlay';
+  overlay.className = 'cfgsync-modal-overlay popup';
   overlay.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
     background: rgba(0, 0, 0, 0.7); display: flex; align-items: center;
@@ -63,20 +63,35 @@ export function showConflictDialog({
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
 
-  // 点击遮罩层关闭（等同取消）
+  ['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].forEach((evt) => {
+    overlay.addEventListener(evt, (e) => e.stopPropagation());
+  });
+
+  const close = (choice) => {
+    if (overlay.parentNode) {
+      overlay.parentNode.removeChild(overlay);
+    }
+    if (onResolve) onResolve(choice);
+  };
+
   overlay.addEventListener('click', (e) => {
+    e.stopPropagation();
     if (e.target === overlay) {
       close('CANCEL');
     }
   });
 
-  const close = (choice) => {
-    document.body.removeChild(overlay);
-    if (onResolve) onResolve(choice);
+  modal.querySelector('#cfgsync-pull-btn').onclick = (e) => {
+    e.stopPropagation();
+    close('PULL_CLOUD');
   };
-
-  modal.querySelector('#cfgsync-pull-btn').onclick = () => close('PULL_CLOUD');
-  modal.querySelector('#cfgsync-overwrite-btn').onclick = () => close('OVERWRITE_CLOUD');
-  modal.querySelector('#cfgsync-cancel-btn').onclick = () => close('CANCEL');
+  modal.querySelector('#cfgsync-overwrite-btn').onclick = (e) => {
+    e.stopPropagation();
+    close('OVERWRITE_CLOUD');
+  };
+  modal.querySelector('#cfgsync-cancel-btn').onclick = (e) => {
+    e.stopPropagation();
+    close('CANCEL');
+  };
 }
 

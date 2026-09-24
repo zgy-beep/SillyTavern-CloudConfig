@@ -20,7 +20,7 @@ function formatCurrentTime() {
  */
 export function showPushDialog({ displayName, contentType, onConfirm }) {
   const overlay = document.createElement('div');
-  overlay.className = 'cfgsync-modal-overlay';
+  overlay.className = 'cfgsync-modal-overlay popup';
   overlay.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
     background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
@@ -103,9 +103,22 @@ export function showPushDialog({ displayName, contentType, onConfirm }) {
   };
   window.addEventListener('keydown', handleKeydown);
 
-  overlay.onclick = (e) => { if (e.target === overlay) close(); };
-  modal.querySelector('#cfgsync-push-close-x').onclick = close;
-  modal.querySelector('#cfgsync-push-cancel-btn').onclick = close;
+  ['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].forEach((evt) => {
+    overlay.addEventListener(evt, (e) => e.stopPropagation());
+  });
+
+  overlay.onclick = (e) => {
+    e.stopPropagation();
+    if (e.target === overlay) close();
+  };
+  modal.querySelector('#cfgsync-push-close-x').onclick = (e) => {
+    e.stopPropagation();
+    close();
+  };
+  modal.querySelector('#cfgsync-push-cancel-btn').onclick = (e) => {
+    e.stopPropagation();
+    close();
+  };
 
   const input = modal.querySelector('#cfgsync-push-title-input');
   const submitBtn = modal.querySelector('#cfgsync-push-submit-btn');

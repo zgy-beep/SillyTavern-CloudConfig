@@ -4,7 +4,7 @@
 
 export async function showSettingsDialog({ api, autoSyncEngine = null, onUpdated = null }) {
   const overlay = document.createElement('div');
-  overlay.className = 'cfgsync-modal-overlay';
+  overlay.className = 'cfgsync-modal-overlay popup';
   overlay.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
     background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
@@ -184,9 +184,22 @@ export async function showSettingsDialog({ api, autoSyncEngine = null, onUpdated
   };
   window.addEventListener('keydown', handleKeydown);
 
-  overlay.onclick = (e) => { if (e.target === overlay) close(); };
-  modal.querySelector('#cfgsync-settings-close-x').onclick = close;
-  modal.querySelector('#cfgsync-settings-cancel-btn').onclick = close;
+  ['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].forEach((evt) => {
+    overlay.addEventListener(evt, (e) => e.stopPropagation());
+  });
+
+  overlay.onclick = (e) => {
+    e.stopPropagation();
+    if (e.target === overlay) close();
+  };
+  modal.querySelector('#cfgsync-settings-close-x').onclick = (e) => {
+    e.stopPropagation();
+    close();
+  };
+  modal.querySelector('#cfgsync-settings-cancel-btn').onclick = (e) => {
+    e.stopPropagation();
+    close();
+  };
 
   const loadingEl = modal.querySelector('#cfgsync-settings-loading');
   const bodyEl = modal.querySelector('#cfgsync-settings-body');

@@ -56,7 +56,7 @@ export function showSnapshotHistoryDialog({
   onDeleteVersion,
 }) {
   const overlay = document.createElement('div');
-  overlay.className = 'cfgsync-modal-overlay';
+  overlay.className = 'cfgsync-modal-overlay popup';
   overlay.style.cssText = `
     position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
     background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
@@ -128,9 +128,22 @@ export function showSnapshotHistoryDialog({
   };
   window.addEventListener('keydown', handleKeydown);
 
-  overlay.onclick = (e) => { if (e.target === overlay) close(); };
-  modal.querySelector('#cfgsync-history-close-x').onclick = close;
-  modal.querySelector('#cfgsync-history-close-btn').onclick = close;
+  ['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].forEach((evt) => {
+    overlay.addEventListener(evt, (e) => e.stopPropagation());
+  });
+
+  overlay.onclick = (e) => {
+    e.stopPropagation();
+    if (e.target === overlay) close();
+  };
+  modal.querySelector('#cfgsync-history-close-x').onclick = (e) => {
+    e.stopPropagation();
+    close();
+  };
+  modal.querySelector('#cfgsync-history-close-btn').onclick = (e) => {
+    e.stopPropagation();
+    close();
+  };
 
   const listContainer = modal.querySelector('#cfgsync-history-list');
   const summaryEl = modal.querySelector('#cfgsync-history-summary');
