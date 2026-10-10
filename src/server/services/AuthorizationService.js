@@ -24,8 +24,8 @@ export class AuthorizationService {
   prepareStatements() {
     this.stmtCheckGrant = this.db.prepare(`
       SELECT id, inject_secrets FROM share_grants
-      WHERE owner_handle = :owner
-        AND (grantee_handle = :grantee OR (is_public = 1 AND grantee_handle IS NULL))
+      WHERE LOWER(owner_handle) = LOWER(:owner)
+        AND (LOWER(grantee_handle) = LOWER(:grantee) OR (is_public = 1 AND grantee_handle IS NULL))
         AND content_type = :contentType
         AND (content_type <> 'settings' OR :allowSettingsSharing = 1)
         AND status = 'active'
@@ -53,7 +53,7 @@ export class AuthorizationService {
     }
 
     // 所有者对其名下的所有对象拥有全部权限
-    if (requesterHandle === ownerHandle) {
+    if (requesterHandle.toLowerCase() === ownerHandle.toLowerCase()) {
       return true;
     }
 

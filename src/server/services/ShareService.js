@@ -116,7 +116,7 @@ export class ShareService {
 
     this.stmtCheckOwnership = this.db.prepare(`
       SELECT 1 FROM config_records
-      WHERE owner_handle = :owner AND content_type = :ct
+      WHERE LOWER(owner_handle) = LOWER(:owner) AND content_type = :ct
         AND (:st = 'CONTENT_TYPE' OR item_uid = :uid)
         AND is_deleted = 0
       LIMIT 1
@@ -133,7 +133,7 @@ export class ShareService {
     this.stmtFindClaimedByGrantee = this.db.prepare(`
       SELECT * FROM share_grants
       WHERE share_code_hash = :hash
-        AND grantee_handle = :grantee
+        AND LOWER(grantee_handle) = LOWER(:grantee)
         AND status = 'active'
       LIMIT 1
     `);
@@ -144,7 +144,7 @@ export class ShareService {
       WHERE id = :id
         AND status IN ('pending', 'active')
         AND (expires_at IS NULL OR expires_at > :now)
-        AND (code_used = 0 OR grantee_handle = :grantee)
+        AND (code_used = 0 OR LOWER(grantee_handle) = LOWER(:grantee))
     `);
 
     this.stmtIncrementMultiUse = this.db.prepare(`
@@ -158,7 +158,7 @@ export class ShareService {
 
     this.stmtFindPublicGrant = this.db.prepare(`
       SELECT id, status FROM share_grants
-      WHERE owner_handle = :owner AND content_type = :ct
+      WHERE LOWER(owner_handle) = LOWER(:owner) AND content_type = :ct
         AND scope_type = :st
         AND (:st = 'CONTENT_TYPE' OR item_uid = :uid)
         AND is_public = 1
@@ -175,7 +175,7 @@ export class ShareService {
     this.stmtRevokePublicGrants = this.db.prepare(`
       UPDATE share_grants
       SET status = 'revoked'
-      WHERE owner_handle = :owner AND content_type = :ct
+      WHERE LOWER(owner_handle) = LOWER(:owner) AND content_type = :ct
         AND scope_type = :st
         AND (:st = 'CONTENT_TYPE' OR item_uid = :uid)
         AND is_public = 1
@@ -185,13 +185,13 @@ export class ShareService {
     this.stmtRevokeByIdAndOwner = this.db.prepare(`
       UPDATE share_grants
       SET status = 'revoked'
-      WHERE id = :id AND owner_handle = :owner
+      WHERE id = :id AND LOWER(owner_handle) = LOWER(:owner)
     `);
 
     this.stmtRevokeByHashAndOwner = this.db.prepare(`
       UPDATE share_grants
       SET status = 'revoked'
-      WHERE share_code_hash = :hash AND owner_handle = :owner
+      WHERE share_code_hash = :hash AND LOWER(owner_handle) = LOWER(:owner)
     `);
 
     this.stmtOutgoingShares = this.db.prepare(`
@@ -199,7 +199,7 @@ export class ShareService {
              permission, grant_method, code_usage, code_used, max_uses, is_public,
              inject_secrets, status, expires_at, created_at
       FROM share_grants
-      WHERE owner_handle = :owner AND status <> 'revoked'
+      WHERE LOWER(owner_handle) = LOWER(:owner) AND status <> 'revoked'
       ORDER BY created_at DESC
     `);
 
@@ -207,7 +207,7 @@ export class ShareService {
       SELECT id, owner_handle, scope_type, content_type, item_uid,
              permission, grant_method, inject_secrets, expires_at, created_at
       FROM share_grants
-      WHERE grantee_handle = :requester AND status = 'active'
+      WHERE LOWER(grantee_handle) = LOWER(:requester) AND status = 'active'
         AND (expires_at IS NULL OR expires_at > :now)
       ORDER BY created_at DESC
     `);
@@ -633,7 +633,7 @@ export class ShareService {
       }
 
       // 严禁认领自己的码
-      if (grantRow.owner_handle === grantee) {
+      if (grantRow.owner_handle.toLowerCase() === grantee.toLowerCase()) {
         const err = new Error('Cannot claim your own share code');
         err.status = 400;
         throw err;

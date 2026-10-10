@@ -312,7 +312,42 @@ export class CloudConfigPanel {
       e.stopPropagation();
       showClaimDialog({
         api: this.api,
-        onClaimed: () => this.refresh(),
+        onClaimed: async (claimResult) => {
+          await this.refresh();
+          if (claimResult && claimResult.content_type) {
+            const drawer = this.container.querySelector(`.cfgsync-group-drawer[data-content-type="${claimResult.content_type}"]`);
+            if (drawer) {
+              const contentEl = drawer.querySelector('.cfgsync-drawer-content');
+              const iconEl = drawer.querySelector('.inline-drawer-icon');
+              if (contentEl) contentEl.style.display = 'block';
+              if (iconEl) {
+                iconEl.classList.remove('down');
+                iconEl.classList.add('up');
+              }
+              this.drawerState.set(claimResult.content_type, true);
+
+              const row = drawer.querySelector(`.cfgsync-item-row[data-item-uid="${claimResult.item_uid}"]`);
+              if (row) {
+                row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                row.style.transition = 'background-color 0.5s ease';
+                row.style.backgroundColor = 'rgba(88, 166, 255, 0.25)';
+                setTimeout(() => {
+                  row.style.backgroundColor = '';
+                }, 2500);
+
+                if (!row._existsLocally) {
+                  const pullNow = confirm(`认领成功！配置「${claimResult.item_uid}」来自 @${claimResult.owner_handle}。\n本地尚未下载该文件，是否立即拉取并保存到本地？`);
+                  if (pullNow) {
+                    await this.restoreSnapshot(row, claimResult.content_type, {
+                      displayName: claimResult.item_uid,
+                      itemUid: claimResult.item_uid,
+                    });
+                  }
+                }
+              }
+            }
+          }
+        },
       });
     };
   }
@@ -520,21 +555,32 @@ export class CloudConfigPanel {
         'group': '群组设定',
         'group_chat': '群聊记录',
         'sprites': '表情贴图包',
-        'openai_preset': 'OpenAI 预设',
-        'textgen_preset': 'TextGen 预设',
-        'novel_preset': 'NovelAI 预设',
-        'kobold_preset': 'KoboldAI 预设',
+        'openai_preset': '对话补全预设',
         'world': '世界设定 / 规则书',
-        'instruct': 'Instruct / 格式预设',
-        'context': 'Context / 上下文预设',
-        'sysprompt': '系统提示词预设',
         'quick_replies': '快捷回复',
       };
 
-      // 动态更新分类下拉筛选选项
+      // 预设分类收敛：现代酒馆用户统一使用“对话补全预设”（openai_preset），精简屏蔽无关冗余类型 (TextGen, NovelAI, KoboldAI, Instruct, Context, Sysprompt)
+      const UNWANTED_PRESET_TYPES = new Set([
+        'textgen_preset',
+        'novel_preset',
+        'kobold_preset',
+        'instruct',
+        'context',
+        'sysprompt',
+      ]);
+      const activeTypesToLoad = allActiveTypes.filter(ct => !UNWANTED_PRESET_TYPES.has(ct));
+
+      // 彻底清理 DOM 中可能残留的被精简抽屉
+      UNWANTED_PRESET_TYPES.forEach(unwantedCt => {
+        const strayDrawer = treeEl.querySelector(`.cfgsync-group-drawer[data-content-type="${unwantedCt}"]`);
+        if (strayDrawer) strayDrawer.remove();
+      });
+
+      // 动态更新分类下拉筛选选项（仅展示收敛后的有效分类）
       const catSelect = this.container.querySelector('#cfgsync-category-filter');
       if (catSelect && catSelect.children.length <= 1) {
-        for (const ct of allActiveTypes) {
+        for (const ct of activeTypesToLoad) {
           const opt = document.createElement('option');
           opt.value = ct;
           opt.textContent = ctNameMap[ct] || ct;
@@ -542,15 +588,20 @@ export class CloudConfigPanel {
         }
       }
 
-      for (const ct of allActiveTypes) {
-        // 1. 获取本地配置项
-        const localRes = await this.api.getItems(ct, this.accountHandle, 'local').catch(() => ({ items: [] }));
-        const localItems = localRes.items || [];
+      // 高性能并发并行拉取所有分类的本地与云端备份（Promise.all 取代循环串行 waterfall）
+      const typeDataList = await Promise.all(activeTypesToLoad.map(async (ct) => {
+        const [localRes, cloudRes] = await Promise.all([
+          this.api.getItems(ct, this.accountHandle, 'local').catch(() => ({ items: [] })),
+          this.api.getItems(ct, '', 'cloud', true).catch(() => ({ items: [] })),
+        ]);
+        return {
+          ct,
+          localItems: localRes.items || [],
+          cloudItems: cloudRes.items || [],
+        };
+      }));
 
-        // 2. 获取云端全量备份（跨所有账号）
-        const cloudRes = await this.api.getItems(ct, '', 'cloud', true).catch(() => ({ items: [] }));
-        const cloudItems = cloudRes.items || [];
-
+      for (const { ct, localItems, cloudItems } of typeDataList) {
         // 核心三类常驻；其余扩展类型若本地与云端均为空，则不展示空抽屉
         const isCoreType = ct === 'settings' || ct === 'openai_preset' || ct === 'world';
         if (!isCoreType && localItems.length === 0 && cloudItems.length === 0) {
@@ -559,7 +610,7 @@ export class CloudConfigPanel {
           continue;
         }
 
-        // 3. 智能合并：既能在本地看到未同步项，也能在其它账号下看到已有云端备份
+        // 智能合并：既能在本地看到未同步项，也能在其它账号下看到已有云端备份
         const itemMap = new Map();
         for (const loc of localItems) {
           itemMap.set(loc.itemUid, {
@@ -782,6 +833,31 @@ export class CloudConfigPanel {
   }
 
   /**
+   * 原地无感更新指定分类抽屉顶部的计数角标与统计描述
+   */
+  updateDrawerCount(contentType) {
+    const groupDrawer = this.container?.querySelector(`.cfgsync-group-drawer[data-content-type="${contentType}"]`);
+    if (!groupDrawer) return;
+    const badgeEl = groupDrawer.querySelector('.cfgsync-count-badge');
+    if (!badgeEl) return;
+    const rows = Array.from(groupDrawer.querySelectorAll('.cfgsync-item-row'));
+    const totalCount = rows.length;
+    const cloudCount = rows.filter(r => r._cloudItem && !r._cloudItem.is_deleted).length;
+    if (totalCount > 0) {
+      badgeEl.textContent = cloudCount > 0 ? `${cloudCount}/${totalCount}` : `${totalCount}`;
+      badgeEl.title = `共 ${totalCount} 项配置：${cloudCount} 项云端有数据，${totalCount - cloudCount} 项未同步`;
+      badgeEl.style.background = cloudCount > 0 ? 'rgba(24, 144, 255, 0.22)' : 'rgba(255, 255, 255, 0.08)';
+      badgeEl.style.color = cloudCount > 0 ? '#69c0ff' : '#8c8c8c';
+      badgeEl.style.opacity = '1';
+    } else {
+      badgeEl.textContent = '0';
+      badgeEl.style.background = 'rgba(255, 255, 255, 0.08)';
+      badgeEl.style.color = '';
+      badgeEl.style.opacity = '0.5';
+    }
+  }
+
+  /**
    * 获取同步状态的颜色与文字描述
    */
   getStateInfo(state, version, cloudItem = null, binding = null) {
@@ -863,7 +939,26 @@ export class CloudConfigPanel {
     try {
       const res = await this.syncManager.pullCloud(row._binding, null, targetVersion);
       row._existsLocally = true;
+      if (row._binding) {
+        row._binding.last_synced_version = res.version;
+        row._binding.last_synced_checksum = res.checksum;
+        row._binding.state = SyncState.SYNCED;
+      }
+      if (!row._cloudItem && res) {
+        row._cloudItem = {
+          owner_handle: res.owner_handle || this.accountHandle,
+          current_version: res.version,
+          current_checksum: res.checksum,
+          item_uid: item.itemUid,
+          display_name: item.displayName,
+        };
+      }
       this.updateRowState(row, row._binding, row._cloudItem, true);
+      this.updateDrawerCount(contentType);
+      const toastMsg = `已成功拉取【${item.displayName || '配置'}】到本地 (${targetVersion ? `v${targetVersion}` : '最新快照'})`;
+      if (typeof toastr !== 'undefined' && toastr?.success) {
+        toastr.success(toastMsg);
+      }
 
       if (contentType === 'settings' && typeof window !== 'undefined' && res.content) {
         try {
@@ -1043,9 +1138,16 @@ export class CloudConfigPanel {
     }
     const rowRef = row.querySelector('.cfgsync-row-ref');
     if (rowRef) {
-      const baseRef = rowRef.dataset.sourceRef || rowRef.title || '';
-      rowRef.textContent = `${baseRef}${!hasCloud ? ' · 仅本地' : ''}`;
-      rowRef.style.color = hasCloud ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)';
+      if (existsLocally) {
+        const baseRef = rowRef.dataset.sourceRef || rowRef.title || '';
+        const cleanRef = baseRef.startsWith('来自云端') ? (row._itemDisplayName ? `${row._itemDisplayName}.json` : baseRef) : baseRef;
+        rowRef.textContent = `${cleanRef}${!hasCloud ? ' · 仅本地' : ''}`;
+        rowRef.style.color = hasCloud ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)';
+      } else {
+        const owner = cItem?.owner_handle || '云端';
+        rowRef.textContent = `来自云端 (@${owner}) · 本地未下载`;
+        rowRef.style.color = '#faad14';
+      }
     }
 
     // 2. 状态徽章与历史浮层
@@ -1081,13 +1183,40 @@ export class CloudConfigPanel {
     }
 
     // 3. 按钮状态与视觉区分
+    const pullBtn = row.querySelector('.cfgsync-pull-btn');
+    if (pullBtn) {
+      pullBtn.disabled = !hasCloud;
+      if (!hasCloud) {
+        pullBtn.style.opacity = '0.15';
+        pullBtn.style.pointerEvents = 'none';
+        pullBtn.style.background = 'transparent';
+        pullBtn.style.borderColor = 'rgba(255,255,255,0.12)';
+        pullBtn.style.color = 'rgba(255,255,255,0.3)';
+        pullBtn.title = '云端暂无可拉取的备份';
+      } else if (!existsLocally) {
+        pullBtn.style.opacity = '1';
+        pullBtn.style.pointerEvents = 'auto';
+        pullBtn.style.background = 'rgba(46, 160, 67, 0.22) !important';
+        pullBtn.style.border = '1px solid rgba(46, 160, 67, 0.5) !important';
+        pullBtn.style.color = '#52c41a !important';
+        pullBtn.title = '从云端拉取此配置保存到本地 (生成本地副本)';
+      } else {
+        pullBtn.style.opacity = '0.85';
+        pullBtn.style.pointerEvents = 'auto';
+        pullBtn.style.background = 'transparent';
+        pullBtn.style.border = '1px solid rgba(255,255,255,0.14)';
+        pullBtn.style.color = '#c9d1d9';
+        pullBtn.title = '重新从云端拉取此配置覆盖本地';
+      }
+    }
+
     const pushBtn = row.querySelector('.cfgsync-push-btn');
     if (pushBtn) {
       pushBtn.disabled = !existsLocally;
       if (!existsLocally) {
         pushBtn.style.opacity = '0.25';
         pushBtn.style.pointerEvents = 'none';
-        pushBtn.title = '本地不存在此文件';
+        pushBtn.title = '本地不存在此文件 (请先点击左侧拉取)';
       } else if (!hasCloud) {
         // 未同步项：强调“推送到云端”为首要行动点 (CTA)
         pushBtn.style.opacity = '1';
@@ -1219,6 +1348,9 @@ export class CloudConfigPanel {
         <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">
           ${this.renderVersionSelectorHtml(state, version, hasCloud ? cItem : null, initialBinding)}
         </div>
+        <button class="cfgsync-pull-btn menu_button" title="${!row._existsLocally ? '从云端拉取此配置保存到本地 (生成本地副本)' : '重新从云端拉取此配置覆盖本地'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important;' : (!row._existsLocally ? 'opacity:1 !important; background:rgba(46,160,67,0.22) !important; border:1px solid rgba(46,160,67,0.5) !important; color:#52c41a !important;' : 'opacity:0.85 !important; background:transparent !important; border:1px solid rgba(255,255,255,0.14) !important; color:#c9d1d9 !important;')}">
+          <i class="fa-solid fa-cloud-arrow-down"></i>
+        </button>
         <button class="cfgsync-push-btn menu_button" title="${hasCloud ? '推送到云端 (上传新快照覆盖云端)' : '未同步：立即推送到云端生成首个快照'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; ${!row._existsLocally ? 'opacity:0.25 !important; pointer-events:none;' : (!hasCloud ? 'opacity:1 !important; background:rgba(31,111,235,0.22) !important; border:1px solid rgba(88,166,255,0.5) !important; color:#58a6ff !important;' : 'opacity:0.9;')}">
           <i class="fa-solid fa-cloud-arrow-up"></i>
         </button>
@@ -1275,7 +1407,19 @@ export class CloudConfigPanel {
       };
     }
 
-    // 勾选切换开关
+    // 绑定直接拉取/下载按钮事件（支持跨账号分享配置一键下载）
+    const pullBtn = row.querySelector('.cfgsync-pull-btn');
+    if (pullBtn) {
+      pullBtn.onmousedown = (e) => e.stopPropagation();
+      pullBtn.onclick = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!hasCloud) return;
+        await this.restoreSnapshot(row, contentType, item);
+      };
+    }
+
+    // 勾选切换开关（若本地尚无文件，自动协同下载）
     const toggle = row.querySelector('.cfgsync-toggle');
     toggle.onmousedown = (e) => e.stopPropagation();
     toggle.onchange = async () => {
@@ -1284,11 +1428,18 @@ export class CloudConfigPanel {
         if (toggle.checked) {
           const sourceOwner = row._cloudItem?.owner_handle || this.accountHandle;
           const binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
-          this.updateRowState(row, binding, row._cloudItem, row._existsLocally);
+          row._binding = binding;
+          if (!row._existsLocally && hasCloud) {
+            // 本地尚无文件：开启同步时顺带拉取至本地，避免空开启导致酒馆内看不到
+            await this.restoreSnapshot(row, contentType, item);
+          } else {
+            this.updateRowState(row, binding, row._cloudItem, row._existsLocally);
+          }
         } else {
           const sourceOwner = row._binding?.source_owner_handle || row._cloudItem?.owner_handle || this.accountHandle;
           const bindingUid = this.storage.makeBindingUid(this.accountHandle, sourceOwner, contentType, item.itemUid);
           const binding = await this.syncManager.disableSync(bindingUid, false);
+          row._binding = binding;
           this.updateRowState(row, binding, row._cloudItem, row._existsLocally);
         }
       } catch (err) {
@@ -1344,9 +1495,23 @@ export class CloudConfigPanel {
                 },
               });
             } else {
+              // 乐观无感更新：原地更新行内状态、徽章与抽屉计数，绝不触发全页面或抽屉刷新抖动
               row._existsLocally = true;
-              await this.refresh();
-              const toastMsg = `已成功推送到云端 (${res.versionTitle || '最新快照'})`;
+              row._cloudItem = {
+                owner_handle: this.accountHandle,
+                current_version: res.version,
+                current_checksum: res.checksum,
+                item_uid: item.itemUid,
+                display_name: item.displayName,
+              };
+              if (row._binding) {
+                row._binding.last_synced_version = res.version;
+                row._binding.last_synced_checksum = res.checksum;
+                row._binding.state = SyncState.SYNCED;
+              }
+              this.updateRowState(row, row._binding, row._cloudItem, true);
+              this.updateDrawerCount(contentType);
+              const toastMsg = `已成功推送到云端 (${res.versionTitle || `v${res.version}`})`;
               if (typeof toastr !== 'undefined' && toastr?.success) {
                 toastr.success(toastMsg);
               }
@@ -1380,7 +1545,7 @@ export class CloudConfigPanel {
       };
     }
 
-    // 安全删除配置（云端备份 / 本地文件）
+    // 安全删除配置（云端备份 / 本地文件；原地更新零刷新）
     const deleteBtn = row.querySelector('.cfgsync-delete-btn');
     if (deleteBtn) {
       deleteBtn.onmouseenter = () => {
@@ -1412,7 +1577,28 @@ export class CloudConfigPanel {
             const sourceOwner = row._cloudItem?.owner_handle || this.accountHandle;
             const bindingUid = this.storage.makeBindingUid(this.accountHandle, sourceOwner, contentType, item.itemUid);
             await this.storage.deleteBinding(bindingUid).catch(() => {});
-            await this.refresh();
+
+            // 原地乐观更新，无需慢速重载整个面板
+            if (deleteCloud && (deleteLocal || !row._existsLocally)) {
+              row.style.transition = 'all 0.2s ease';
+              row.style.opacity = '0';
+              row.style.transform = 'translateX(20px)';
+              setTimeout(() => {
+                row.remove();
+                this.updateDrawerCount(contentType);
+              }, 200);
+            } else if (deleteCloud) {
+              row._cloudItem = null;
+              if (row._binding) {
+                row._binding.state = SyncState.DISABLED;
+              }
+              this.updateRowState(row, row._binding, null, true);
+              this.updateDrawerCount(contentType);
+            } else if (deleteLocal) {
+              row._existsLocally = false;
+              this.updateRowState(row, row._binding, row._cloudItem, false);
+              this.updateDrawerCount(contentType);
+            }
 
             if (deleteLocal && res?.deleted_local === false && res?.local_reason === 'local_file_not_found') {
               alert('【删除提示】\n\n本地未找到该配置文件，已仅删除云端备份记录。');

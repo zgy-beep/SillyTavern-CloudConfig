@@ -121,7 +121,7 @@ export function showClaimDialog({ api, onClaimed }) {
       submitBtn.innerHTML = '<i class="fa-solid fa-check"></i><span>已完成</span>';
       setTimeout(() => {
         close();
-        if (onClaimed) onClaimed();
+        if (onClaimed) onClaimed(res);
       }, 1200);
     } catch (err) {
       submitBtn.disabled = false;
@@ -246,9 +246,10 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
 
+  let hasChanges = false;
   const close = () => {
     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-    if (onUpdated) onUpdated();
+    if (onUpdated && hasChanges) onUpdated();
   };
 
   ['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].forEach((evt) => {
@@ -289,6 +290,7 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
         maxUses: codeUsage === 'multi_use' ? 0 : 1,
         injectSecrets,
       });
+      hasChanges = true;
       codeDisplay.textContent = res.share_code;
       resultBox.style.display = 'block';
       genBtn.textContent = '重新生成';
@@ -310,10 +312,29 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
     }
   };
 
-  // 全服公开切换
+  // 全服公开切换与当前状态探测
   const publicBtn = modal.querySelector('#cfgsync-public-toggle-btn');
   const publicMsg = modal.querySelector('#cfgsync-public-status-msg');
   let isCurrentlyPublic = false;
+
+  // 探测当前是否已为公开状态
+  api.getOutgoingShares().then((res) => {
+    const list = res?.shares || [];
+    const publicShare = list.find((s) => s.content_type === contentType && s.item_uid === itemUid && s.is_public === 1 && s.status === 'active');
+    if (publicShare) {
+      isCurrentlyPublic = true;
+      publicBtn.textContent = '取消公开';
+      publicBtn.style.background = 'rgba(245, 34, 45, 0.15)';
+      publicBtn.style.borderColor = 'rgba(245, 34, 45, 0.4)';
+      publicBtn.style.color = '#ff7875';
+      publicMsg.style.display = 'block';
+      publicMsg.style.color = '#73d13d';
+      publicMsg.innerHTML = '<i class="fa-solid fa-circle-check"></i> 当前已开启全服公开只读';
+      if (injectSecretsCb && publicShare.inject_secrets) {
+        injectSecretsCb.checked = true;
+      }
+    }
+  }).catch(() => {});
 
   publicBtn.onclick = async () => {
     publicBtn.disabled = true;
@@ -326,6 +347,7 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
         enabled: targetState,
         injectSecrets,
       });
+      hasChanges = true;
       isCurrentlyPublic = targetState;
       if (isCurrentlyPublic) {
         publicBtn.textContent = '取消公开';

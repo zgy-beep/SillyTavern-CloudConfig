@@ -116,10 +116,10 @@ export function createPluginRouter({
     if (contentType) {
       stmt = syncService.db.prepare(`
         SELECT DISTINCT owner_handle FROM config_records 
-        WHERE owner_handle = :requester AND content_type = :ct AND is_deleted = 0
+        WHERE LOWER(owner_handle) = LOWER(:requester) AND content_type = :ct AND is_deleted = 0
         UNION
         SELECT DISTINCT owner_handle FROM share_grants
-        WHERE (grantee_handle = :requester OR (is_public = 1 AND grantee_handle IS NULL))
+        WHERE (LOWER(grantee_handle) = LOWER(:requester) OR (is_public = 1 AND grantee_handle IS NULL))
           AND content_type = :ct
           AND content_type <> 'group_chat'
           AND (content_type <> 'settings' OR :allowSettingsSharing = 1)
@@ -131,10 +131,10 @@ export function createPluginRouter({
     } else {
       stmt = syncService.db.prepare(`
         SELECT DISTINCT owner_handle FROM config_records 
-        WHERE owner_handle = :requester AND is_deleted = 0
+        WHERE LOWER(owner_handle) = LOWER(:requester) AND is_deleted = 0
         UNION
         SELECT DISTINCT owner_handle FROM share_grants
-        WHERE (grantee_handle = :requester OR (is_public = 1 AND grantee_handle IS NULL))
+        WHERE (LOWER(grantee_handle) = LOWER(:requester) OR (is_public = 1 AND grantee_handle IS NULL))
           AND content_type <> 'group_chat'
           AND (content_type <> 'settings' OR :allowSettingsSharing = 1)
           AND status = 'active'
@@ -191,14 +191,14 @@ export function createPluginRouter({
         FROM config_records c
         WHERE c.content_type = :ct AND c.is_deleted = 0
           AND (
-            c.owner_handle = :requester
+            LOWER(c.owner_handle) = LOWER(:requester)
             OR (
               c.content_type <> 'group_chat'
               AND (:ct <> 'settings' OR :allowSettingsSharing = 1)
               AND EXISTS (
                 SELECT 1 FROM share_grants g
-                WHERE g.owner_handle = c.owner_handle
-                  AND (g.grantee_handle = :requester OR (g.is_public = 1 AND g.grantee_handle IS NULL))
+                WHERE LOWER(g.owner_handle) = LOWER(c.owner_handle)
+                  AND (LOWER(g.grantee_handle) = LOWER(:requester) OR (g.is_public = 1 AND g.grantee_handle IS NULL))
                   AND g.content_type = :ct
                   AND g.content_type <> 'group_chat'
                   AND (g.content_type <> 'settings' OR :allowSettingsSharing = 1)
@@ -223,7 +223,7 @@ export function createPluginRouter({
       const stmt = syncService.db.prepare(`
         SELECT DISTINCT c.owner_handle, c.item_uid, c.display_name, c.current_version, c.current_checksum, c.updated_at
         FROM config_records c
-        WHERE c.content_type = :ct AND c.owner_handle = :owner AND c.is_deleted = 0
+        WHERE c.content_type = :ct AND LOWER(c.owner_handle) = LOWER(:owner) AND c.is_deleted = 0
         ORDER BY c.updated_at DESC
       `);
       records = stmt.all({
@@ -259,7 +259,7 @@ export function createPluginRouter({
     }
 
     // 鉴权与服务端授权推导（绝不依赖任何前端入参伪造）
-    const isSelf = req.authContext.handle === owner;
+    const isSelf = req.authContext.handle.toLowerCase() === owner.toLowerCase();
     let validatedGrant = null;
     if (!isSelf) {
       validatedGrant = authService.getApprovedGrant(owner, req.authContext.handle, contentType, itemUid);
