@@ -26,18 +26,123 @@ export class CloudConfigPanel {
     this.accountHandle = accountHandle;
     this.onAccountChange = onAccountChange;
     this.autoSyncEngine = autoSyncEngine;
+    this.entryContainer = null;
+    this.modalBackdrop = null;
     this.container = null;
     this._refreshing = false;
     this._allowSettingsSharing = false;
+    this.activeTab = 'world';
     this.thumbnailCache = new Map();
     this.drawerState = new Map();
   }
 
-
   render(targetEl) {
-    this.container = targetEl;
+    this.entryContainer = targetEl;
+    this.renderEntryBar();
+
+    if (typeof document !== 'undefined' && document.body) {
+      let backdrop = document.getElementById('cfgsync-main-modal-backdrop');
+      if (!backdrop) {
+        backdrop = document.createElement('div');
+        backdrop.id = 'cfgsync-main-modal-backdrop';
+        backdrop.className = 'cfgsync-modal-overlay popup';
+        backdrop.style.cssText = `
+          position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+          background: rgba(0, 0, 0, 0.68); z-index: 99990;
+          display: none; align-items: center; justify-content: center;
+          backdrop-filter: blur(3px); padding: 12px; box-sizing: border-box;
+        `;
+
+        const dialog = document.createElement('div');
+        dialog.id = 'cfgsync-modal-dialog';
+        dialog.style.cssText = `
+          width: 680px; max-width: 96vw; max-height: 88vh;
+          background: #161920; border: 1px solid rgba(255, 255, 255, 0.14);
+          border-radius: 8px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+          display: flex; flex-direction: column; overflow: hidden;
+          color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          box-sizing: border-box;
+        `;
+
+        backdrop.appendChild(dialog);
+        document.body.appendChild(backdrop);
+
+        ['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].forEach((evt) => {
+          backdrop.addEventListener(evt, (e) => e.stopPropagation());
+        });
+
+        backdrop.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (e.target === backdrop) {
+            this.closeModal();
+          }
+        });
+      }
+      this.modalBackdrop = backdrop;
+      this.container = backdrop.querySelector('#cfgsync-modal-dialog');
+    } else {
+      this.container = targetEl;
+    }
+
     this.ensureShell();
     this.refresh();
+  }
+
+  /**
+   * 在扩展设置侧边栏内渲染极简入口条（点击「打开面板」弹出独立窗口）
+   */
+  renderEntryBar() {
+    if (!this.entryContainer) return;
+    this.entryContainer.innerHTML = `
+      <div class="cfgsync-entry-bar" style="background: #161920; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; box-sizing: border-box;">
+        <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+          <span style="font-size: 13px; font-weight: 600; color: #e6edf3; white-space: nowrap;">配置云同步</span>
+          <span style="font-size: 12px; color: #8b949e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">账号: <strong class="cfgsync-entry-account-label" style="color: #c9d1d9; font-weight: 500;">${this.accountHandle}</strong></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+          <button id="cfgsync-open-modal-btn" type="button" style="height: 26px; padding: 0 11px; border-radius: 5px; font-size: 12px; font-weight: 600; color: #e6edf3; background: rgba(88,166,255,0.16); border: 1px solid rgba(88,166,255,0.42); cursor: pointer; white-space: nowrap !important; width: auto !important; min-width: unset !important; margin: 0;">
+            打开面板
+          </button>
+          <button id="cfgsync-entry-backup-btn" type="button" style="height: 26px; padding: 0 10px; border-radius: 5px; font-size: 12px; font-weight: 500; color: #c9d1d9; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); cursor: pointer; white-space: nowrap !important; width: auto !important; min-width: unset !important; margin: 0;">
+            <span class="cfgsync-entry-backup-text">一键备份</span>
+          </button>
+        </div>
+      </div>
+    `;
+
+    const openBtn = this.entryContainer.querySelector('#cfgsync-open-modal-btn');
+    if (openBtn) {
+      openBtn.onmousedown = (e) => e.stopPropagation();
+      openBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.openModal();
+      };
+    }
+
+    const entryBackupBtn = this.entryContainer.querySelector('#cfgsync-entry-backup-btn');
+    if (entryBackupBtn) {
+      entryBackupBtn.onmousedown = (e) => e.stopPropagation();
+      entryBackupBtn.onclick = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await this.runBackupAll();
+      };
+    }
+  }
+
+  openModal() {
+    this.ensureShell();
+    if (this.modalBackdrop) {
+      this.modalBackdrop.style.display = 'flex';
+    }
+    this.refresh();
+  }
+
+  closeModal() {
+    if (this.modalBackdrop) {
+      this.modalBackdrop.style.display = 'none';
+    }
   }
 
   /**
@@ -48,58 +153,74 @@ export class CloudConfigPanel {
       return;
     }
 
-    this.container.innerHTML = `
-      <div class="cfgsync-panel-container" style="padding: 4px 2px; font-family: sans-serif;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding-bottom:6px; border-bottom: 1px solid rgba(255,255,255,0.08); gap:8px;">
-          <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-            <span style="font-size:12px; font-weight:600; opacity:0.9;">云端配置</span>
-            <button id="cfgsync-toggle-all-btn" type="button" title="切换全部展开/折叠" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 8px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#69c0ff; background:rgba(24,144,255,0.12); border:1px solid rgba(24,144,255,0.3); cursor:pointer; user-select:none;">
-              <i class="fa-solid fa-angles-down" style="font-size:10px;"></i>
-              <span class="cfgsync-toggle-all-text">全部展开</span>
-            </button>
-            <button id="cfgsync-refresh-btn" type="button" title="刷新配置状态" style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; margin:0; border-radius:4px; font-size:10px; color:#69c0ff; background:rgba(24,144,255,0.12); border:1px solid rgba(24,144,255,0.3); cursor:pointer; user-select:none;">
-              <i class="fa-solid fa-rotate"></i>
-            </button>
-            <button id="cfgsync-backup-all-btn" type="button" title="一键备份所有已开启同步的本地配置到云端" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 8px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#13c2c2; background:rgba(19,194,194,0.12); border:1px solid rgba(19,194,194,0.3); cursor:pointer; user-select:none;">
-              <i class="fa-solid fa-cloud-arrow-up" style="font-size:10px;"></i>
-              <span class="cfgsync-backup-all-text">一键备份</span>
-            </button>
-            <button id="cfgsync-export-backup-btn" type="button" title="导出全量配置与资产灾备归档包 (.zip)" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 7px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#b37feb; background:rgba(179,127,235,0.12); border:1px solid rgba(179,127,235,0.3); cursor:pointer; user-select:none;">
-              <i class="fa-solid fa-file-zipper" style="font-size:10px;"></i>
-              <span class="cfgsync-export-backup-text">灾备导出</span>
-            </button>
-            <button id="cfgsync-import-backup-btn" type="button" title="导入灾备归档包 (.zip，零静默覆盖)" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 7px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#faad14; background:rgba(250,173,20,0.12); border:1px solid rgba(250,173,20,0.3); cursor:pointer; user-select:none;">
-              <i class="fa-solid fa-file-import" style="font-size:10px;"></i>
-              <span class="cfgsync-import-backup-text">灾备导入</span>
-            </button>
-            <input type="file" id="cfgsync-dr-file-input" accept=".zip,application/zip,application/x-zip-compressed" style="display:none;" />
-            <button id="cfgsync-claim-btn" type="button" title="认领好友分享给你的配置邀请码" style="display:inline-flex; align-items:center; gap:3px; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:22px; padding:0 8px; margin:0; border-radius:4px; font-size:11px; font-weight:500; color:#52c41a; background:rgba(82,196,26,0.12); border:1px solid rgba(82,196,26,0.3); cursor:pointer; user-select:none;">
-              <i class="fa-solid fa-key" style="font-size:10px;"></i>
-              <span>认领</span>
-            </button>
+    const neutralBtnStyle = 'display:inline-flex; align-items:center; justify-content:center; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:28px; padding:0 11px; margin:0; border-radius:5px; font-size:12px; font-weight:500; color:#c9d1d9; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); cursor:pointer; user-select:none;';
+    const primaryBtnStyle = 'display:inline-flex; align-items:center; justify-content:center; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:28px; padding:0 12px; margin:0; border-radius:5px; font-size:12px; font-weight:600; color:#e6edf3; background:rgba(88,166,255,0.16); border:1px solid rgba(88,166,255,0.42); cursor:pointer; user-select:none;';
 
-            <button id="cfgsync-settings-btn" type="button" title="云同步设置" style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; margin:0; border-radius:4px; font-size:10.5px; color:#c9d1d9; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.18); cursor:pointer; user-select:none;">
-              <i class="fa-solid fa-gear"></i>
-            </button>
-            <button id="cfgsync-dashboard-btn" type="button" title="存储看板与清理工具" style="display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; padding:0; margin:0; border-radius:4px; font-size:10.5px; color:#58a6ff; background:rgba(88,166,255,0.12); border:1px solid rgba(88,166,255,0.3); cursor:pointer; user-select:none;">
-              <i class="fa-solid fa-chart-pie"></i>
-            </button>
+    this.container.innerHTML = `
+      <div class="cfgsync-panel-container" style="display:flex; flex-direction:column; width:100%; height:100%; max-height:88vh; overflow:hidden; box-sizing:border-box;">
+        <!-- 第一行：标题与账号栏 -->
+        <div style="padding:12px 16px; border-bottom:1px solid rgba(255,255,255,0.07); background:rgba(255,255,255,0.02); display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
+          <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+            <span style="font-size:15px; font-weight:600; color:#f0f6fc; white-space:nowrap;">云端配置</span>
+            <span style="font-size:12px; color:#8b949e; padding:1px 8px; border-radius:4px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">账号: <strong class="cfgsync-account-label" style="color:#c9d1d9; font-weight:500;">${this.accountHandle}</strong></span>
           </div>
-          <span style="font-size:11.5px; opacity:0.75; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">账号: <strong class="cfgsync-account-label" style="color:#69c0ff;">${this.accountHandle}</strong></span>
+          <button id="cfgsync-modal-close-btn" type="button" title="关闭" style="width:28px !important; min-width:28px !important; height:28px !important; padding:0; margin:0; border-radius:5px; background:transparent; border:none; color:#8b949e; font-size:20px; line-height:1; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">&times;</button>
         </div>
-        <div class="cfgsync-filter-bar" style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
-          <div style="position:relative; flex:1;">
-            <input id="cfgsync-search-input" type="text" placeholder="搜索配置项名称..." style="width:100%; box-sizing:border-box; height:24px; font-size:11px; padding:2px 22px 2px 8px; border-radius:4px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.15); color:#fff;" />
-            <i class="fa-solid fa-magnifying-glass" style="position:absolute; right:7px; top:6px; font-size:10px; opacity:0.5; pointer-events:none;"></i>
+
+        <!-- 第二行：独立全局操作按钮栏 -->
+        <div style="padding:10px 16px; border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.01); display:flex; align-items:center; gap:6px; flex-wrap:wrap; flex-shrink:0;">
+          <button id="cfgsync-backup-all-btn" type="button" title="一键备份所有已开启同步的本地配置到云端" style="${primaryBtnStyle}">
+            <span class="cfgsync-backup-all-text">一键备份</span>
+          </button>
+          <button id="cfgsync-claim-btn" type="button" title="认领好友分享给你的配置邀请码" style="${neutralBtnStyle}">
+            <span>认领</span>
+          </button>
+          <button id="cfgsync-refresh-btn" type="button" title="刷新配置状态" style="${neutralBtnStyle}">
+            <span class="cfgsync-refresh-text">刷新</span>
+          </button>
+          <button id="cfgsync-export-backup-btn" type="button" title="导出全量配置与资产灾备归档包 (.zip)" style="${neutralBtnStyle}">
+            <span class="cfgsync-export-backup-text">灾备导出</span>
+          </button>
+          <button id="cfgsync-import-backup-btn" type="button" title="导入灾备归档包 (.zip，零静默覆盖)" style="${neutralBtnStyle}">
+            <span class="cfgsync-import-backup-text">灾备导入</span>
+          </button>
+          <input type="file" id="cfgsync-dr-file-input" accept=".zip,application/zip,application/x-zip-compressed" style="display:none;" />
+          <button id="cfgsync-dashboard-btn" type="button" title="存储看板与清理工具" style="${neutralBtnStyle}">
+            <span>看板</span>
+          </button>
+          <button id="cfgsync-settings-btn" type="button" title="云同步设置" style="${neutralBtnStyle}">
+            <span>设置</span>
+          </button>
+        </div>
+
+        <!-- 第三行：分类标签栏与搜索框 -->
+        <div class="cfgsync-filter-bar" style="padding:10px 16px; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; gap:8px; flex-shrink:0;">
+          <div id="cfgsync-category-tabs" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;"></div>
+          <div>
+            <input id="cfgsync-search-input" type="text" placeholder="搜索当前分类下的配置名称或文件名..." style="width:100%; box-sizing:border-box; height:30px; font-size:12px; padding:0 10px; border-radius:5px; background:rgba(0,0,0,0.28); border:1px solid rgba(255,255,255,0.1); color:#e6edf3; outline:none;" />
+            <select id="cfgsync-category-filter" style="display:none;">
+              <option value="">全部分类</option>
+            </select>
           </div>
-          <select id="cfgsync-category-filter" style="height:24px; font-size:11px; padding:0 4px; border-radius:4px; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.15); color:#fff; max-width:110px;">
-            <option value="">全部分类</option>
-          </select>
         </div>
-        <div id="cfgsync-items-loading" style="text-align:center; padding:16px; font-size:12px; opacity:0.7;">正在加载配置...</div>
-        <div id="cfgsync-items-tree"></div>
+
+        <!-- 第四部分：主体滚动列表区 -->
+        <div style="padding:12px 16px; overflow-y:auto; flex:1; min-height:220px;">
+          <div id="cfgsync-items-loading" style="text-align:center; padding:24px 16px; font-size:12px; color:#8b949e;">正在加载配置...</div>
+          <div id="cfgsync-items-tree"></div>
+        </div>
       </div>
     `;
+
+    const closeBtn = this.container.querySelector('#cfgsync-modal-close-btn');
+    if (closeBtn) {
+      closeBtn.onmousedown = (e) => e.stopPropagation();
+      closeBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeModal();
+      };
+    }
 
     this.bindToggleAll();
     this.bindRefresh();
@@ -111,6 +232,43 @@ export class CloudConfigPanel {
     this.bindDisasterRecovery();
   }
 
+  /**
+   * 切换当前激活的分类标签页
+   */
+  switchCategoryTab(contentType) {
+    if (!contentType) return;
+    this.activeTab = contentType;
+    this.drawerState.set(contentType, true);
+
+    if (!this.container) return;
+    const tabsEl = this.container.querySelector('#cfgsync-category-tabs');
+    if (tabsEl) {
+      tabsEl.querySelectorAll('.cfgsync-cat-tab-btn').forEach((btn) => {
+        const isActive = btn.dataset.tabType === contentType;
+        btn.style.fontWeight = isActive ? '600' : '400';
+        btn.style.color = isActive ? '#f0f6fc' : '#8b949e';
+        btn.style.background = isActive ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.02)';
+        btn.style.borderColor = isActive ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.07)';
+        const badge = btn.querySelector('.cfgsync-tab-badge');
+        if (badge) {
+          badge.style.background = isActive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)';
+          badge.style.color = isActive ? '#e6edf3' : '#8b949e';
+        }
+      });
+    }
+
+    const treeEl = this.container.querySelector('#cfgsync-items-tree');
+    if (treeEl) {
+      treeEl.querySelectorAll('.cfgsync-group-drawer').forEach((drawer) => {
+        const isMatch = drawer.dataset.contentType === contentType;
+        drawer.style.display = isMatch ? 'block' : 'none';
+        const contentEl = drawer.querySelector('.cfgsync-drawer-content');
+        if (contentEl && isMatch) {
+          contentEl.style.display = 'block';
+        }
+      });
+    }
+  }
 
   bindSearchFilter() {
     const searchInput = this.container.querySelector('#cfgsync-search-input');
@@ -119,7 +277,7 @@ export class CloudConfigPanel {
 
     const applyFilter = () => {
       const q = (searchInput.value || '').trim().toLowerCase();
-      const selectedCat = catSelect.value;
+      const selectedCat = catSelect.value || this.activeTab;
       const treeEl = this.container.querySelector('#cfgsync-items-tree');
       if (!treeEl) return;
 
@@ -141,16 +299,10 @@ export class CloudConfigPanel {
           if (match) visibleCount++;
         });
 
-        if (q) {
-          drawer.style.display = visibleCount > 0 ? 'block' : 'none';
-          const content = drawer.querySelector('.cfgsync-drawer-content');
-          if (content && visibleCount > 0) {
-            content.style.display = 'block';
-            const icon = drawer.querySelector('.inline-drawer-icon');
-            if (icon) { icon.classList.remove('down'); icon.classList.add('up'); }
-          }
-        } else {
-          drawer.style.display = 'block';
+        drawer.style.display = 'block';
+        const content = drawer.querySelector('.cfgsync-drawer-content');
+        if (content) {
+          content.style.display = 'block';
         }
       });
     };
@@ -189,10 +341,8 @@ export class CloudConfigPanel {
           return;
         }
 
-        const icon = exportBtn.querySelector('i');
         const textSpan = exportBtn.querySelector('.cfgsync-export-backup-text');
         exportBtn.disabled = true;
-        if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
         if (textSpan) textSpan.textContent = '导出中...';
 
         try {
@@ -217,7 +367,6 @@ export class CloudConfigPanel {
           alert(`导出灾备包失败: ${err.message}`);
         } finally {
           exportBtn.disabled = false;
-          if (icon) icon.className = 'fa-solid fa-file-zipper';
           if (textSpan) textSpan.textContent = '灾备导出';
         }
       };
@@ -243,10 +392,8 @@ export class CloudConfigPanel {
           return;
         }
 
-        const icon = importBtn.querySelector('i');
         const textSpan = importBtn.querySelector('.cfgsync-import-backup-text');
         importBtn.disabled = true;
-        if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
         if (textSpan) textSpan.textContent = '导入中...';
 
         try {
@@ -259,7 +406,6 @@ export class CloudConfigPanel {
         } finally {
           fileInput.value = '';
           importBtn.disabled = false;
-          if (icon) icon.className = 'fa-solid fa-file-import';
           if (textSpan) textSpan.textContent = '灾备导入';
         }
       };
@@ -314,24 +460,19 @@ export class CloudConfigPanel {
       showClaimDialog({
         api: this.api,
         onClaimed: async (claimResult) => {
+          if (claimResult && claimResult.content_type) {
+            this.activeTab = claimResult.content_type;
+          }
           await this.refresh();
           if (claimResult && claimResult.content_type) {
+            this.switchCategoryTab(claimResult.content_type);
             const drawer = this.container.querySelector(`.cfgsync-group-drawer[data-content-type="${claimResult.content_type}"]`);
             if (drawer) {
-              const contentEl = drawer.querySelector('.cfgsync-drawer-content');
-              const iconEl = drawer.querySelector('.inline-drawer-icon');
-              if (contentEl) contentEl.style.display = 'block';
-              if (iconEl) {
-                iconEl.classList.remove('down');
-                iconEl.classList.add('up');
-              }
-              this.drawerState.set(claimResult.content_type, true);
-
               const row = drawer.querySelector(`.cfgsync-item-row[data-item-uid="${claimResult.item_uid}"]`);
               if (row) {
                 row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 row.style.transition = 'background-color 0.5s ease';
-                row.style.backgroundColor = 'rgba(88, 166, 255, 0.25)';
+                row.style.backgroundColor = 'rgba(88, 166, 255, 0.2)';
                 setTimeout(() => {
                   row.style.backgroundColor = '';
                 }, 2500);
@@ -362,12 +503,14 @@ export class CloudConfigPanel {
     refreshBtn.onclick = async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const icon = refreshBtn.querySelector('i');
-      if (icon) icon.classList.add('fa-spin');
+      const textSpan = refreshBtn.querySelector('.cfgsync-refresh-text');
+      refreshBtn.disabled = true;
+      if (textSpan) textSpan.textContent = '刷新中...';
       try {
         await this.refresh();
       } finally {
-        if (icon) icon.classList.remove('fa-spin');
+        refreshBtn.disabled = false;
+        if (textSpan) textSpan.textContent = '刷新';
       }
     };
   }
@@ -393,7 +536,8 @@ export class CloudConfigPanel {
   async runBackupAll() {
     const backupBtn = this.container?.querySelector?.('#cfgsync-backup-all-btn');
     const textSpan = backupBtn?.querySelector?.('.cfgsync-backup-all-text');
-    const iconI = backupBtn?.querySelector?.('i');
+    const entryBackupBtn = this.entryContainer?.querySelector?.('#cfgsync-entry-backup-btn');
+    const entryTextSpan = entryBackupBtn?.querySelector?.('.cfgsync-entry-backup-text');
 
     const bindings = await this.storage.getBindingsByAccount(this.accountHandle);
     const enabledBindings = (bindings || []).filter(b => b.enabled);
@@ -408,10 +552,8 @@ export class CloudConfigPanel {
       return { total: enabledBindings.length, successCount: 0, failCount: 0, cancelled: true };
     }
 
-    if (backupBtn) {
-      backupBtn.disabled = true;
-      if (iconI) iconI.className = 'fa-solid fa-spinner fa-spin';
-    }
+    if (backupBtn) backupBtn.disabled = true;
+    if (entryBackupBtn) entryBackupBtn.disabled = true;
 
     let successCount = 0;
     let totalBytes = 0;
@@ -420,8 +562,9 @@ export class CloudConfigPanel {
     try {
       for (let i = 0; i < enabledBindings.length; i++) {
         const binding = enabledBindings[i];
-        const progressText = `正在备份 (${i + 1}/${enabledBindings.length})...`;
+        const progressText = `备份中 (${i + 1}/${enabledBindings.length})...`;
         if (textSpan) textSpan.textContent = progressText;
+        if (entryTextSpan) entryTextSpan.textContent = progressText;
 
         try {
           let localPayload = null;
@@ -467,51 +610,18 @@ export class CloudConfigPanel {
       if (backupBtn) {
         backupBtn.disabled = false;
         if (textSpan) textSpan.textContent = '一键备份';
-        if (iconI) iconI.className = 'fa-solid fa-cloud-arrow-up';
+      }
+      if (entryBackupBtn) {
+        entryBackupBtn.disabled = false;
+        if (entryTextSpan) entryTextSpan.textContent = '一键备份';
       }
     }
   }
 
   bindToggleAll() {
-    const toggleAllBtn = this.container.querySelector('#cfgsync-toggle-all-btn');
+    const toggleAllBtn = this.container?.querySelector?.('#cfgsync-toggle-all-btn');
     if (!toggleAllBtn || toggleAllBtn.dataset.bound) return;
     toggleAllBtn.dataset.bound = 'true';
-
-    let allExpanded = false;
-    toggleAllBtn.onmousedown = (e) => e.stopPropagation();
-    toggleAllBtn.onclick = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      allExpanded = !allExpanded;
-      const textSpan = toggleAllBtn.querySelector('.cfgsync-toggle-all-text');
-      const iconI = toggleAllBtn.querySelector('i');
-      if (textSpan) textSpan.textContent = allExpanded ? '全部折叠' : '全部展开';
-      if (iconI) {
-        iconI.className = allExpanded ? 'fa-solid fa-angles-up' : 'fa-solid fa-angles-down';
-      }
-      const treeEl = this.container.querySelector('#cfgsync-items-tree');
-      if (!treeEl) return;
-      const groupDrawers = treeEl.querySelectorAll('.cfgsync-group-drawer');
-      groupDrawers.forEach(drawer => {
-        const content = drawer.querySelector('.cfgsync-drawer-content');
-        const icon = drawer.querySelector('.inline-drawer-icon');
-        if (content) {
-          content.style.display = allExpanded ? 'block' : 'none';
-        }
-        if (icon) {
-          if (allExpanded) {
-            icon.classList.remove('down');
-            icon.classList.add('up');
-          } else {
-            icon.classList.remove('up');
-            icon.classList.add('down');
-          }
-        }
-        if (drawer.dataset.contentType) {
-          this.drawerState.set(drawer.dataset.contentType, allExpanded);
-        }
-      });
-    };
   }
 
   /**
@@ -536,6 +646,8 @@ export class CloudConfigPanel {
         this.accountHandle = typeRes.current_user;
         const labelEl = this.container.querySelector('.cfgsync-account-label');
         if (labelEl) labelEl.textContent = this.accountHandle;
+        const entryLabelEl = this.entryContainer?.querySelector?.('.cfgsync-entry-account-label');
+        if (entryLabelEl) entryLabelEl.textContent = this.accountHandle;
         if (typeof this.onAccountChange === 'function') {
           this.onAccountChange(this.accountHandle);
         }
@@ -543,28 +655,42 @@ export class CloudConfigPanel {
       this._isAdmin = Boolean(typeRes.is_admin);
       this._allowSettingsSharing = Boolean(typeRes.allow_settings_sharing);
 
-      // 支持所有已注册并启用的配置类型（核心类型 + P1 纯 JSON 预设）
       const allActiveTypes = typeRes.activeTypes || (typeRes.groups?.P0 || ['settings', 'openai_preset', 'world']);
       const bindings = await this.storage.getBindingsByAccount(this.accountHandle);
       const bindingMap = new Map(bindings.map(b => [`${b.content_type}:${b.item_uid}`, b]));
 
       const ctNameMap = {
-        'settings': '通用设置',
+        'world': '世界设定 / 规则书',
+        'openai_preset': '对话补全预设',
         'character': '角色卡',
-        'chat': '会话记录',
-        'theme': '主题风格',
-        'background': '聊天背景',
+        'settings': '通用设置',
         'persona': '用户人设',
         'avatar': '人设头像',
+        'chat': '会话记录',
         'group': '群组设定',
         'group_chat': '群聊记录',
+        'theme': '主题风格',
+        'background': '聊天背景',
         'sprites': '表情贴图包',
-        'openai_preset': '对话补全预设',
-        'world': '世界设定 / 规则书',
         'quick_replies': '快捷回复',
       };
 
-      // 预设分类收敛：现代酒馆用户统一使用“对话补全预设”（openai_preset），精简屏蔽无关冗余类型 (TextGen, NovelAI, KoboldAI, Instruct, Context, Sysprompt)
+      const preferredOrder = [
+        'world',
+        'openai_preset',
+        'character',
+        'settings',
+        'persona',
+        'avatar',
+        'chat',
+        'group',
+        'group_chat',
+        'theme',
+        'background',
+        'sprites',
+        'quick_replies',
+      ];
+
       const UNWANTED_PRESET_TYPES = new Set([
         'textgen_preset',
         'novel_preset',
@@ -573,15 +699,19 @@ export class CloudConfigPanel {
         'context',
         'sysprompt',
       ]);
-      const activeTypesToLoad = allActiveTypes.filter(ct => !UNWANTED_PRESET_TYPES.has(ct));
+      const activeTypesToLoad = allActiveTypes
+        .filter(ct => !UNWANTED_PRESET_TYPES.has(ct))
+        .sort((a, b) => {
+          const idxA = preferredOrder.indexOf(a);
+          const idxB = preferredOrder.indexOf(b);
+          return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+        });
 
-      // 彻底清理 DOM 中可能残留的被精简抽屉
       UNWANTED_PRESET_TYPES.forEach(unwantedCt => {
         const strayDrawer = treeEl.querySelector(`.cfgsync-group-drawer[data-content-type="${unwantedCt}"]`);
         if (strayDrawer) strayDrawer.remove();
       });
 
-      // 动态更新分类下拉筛选选项（仅展示收敛后的有效分类）
       const catSelect = this.container.querySelector('#cfgsync-category-filter');
       if (catSelect && catSelect.children.length <= 1) {
         for (const ct of activeTypesToLoad) {
@@ -592,7 +722,6 @@ export class CloudConfigPanel {
         }
       }
 
-      // 高性能并发并行拉取所有分类的本地与云端备份（Promise.all 取代循环串行 waterfall）
       const typeDataList = await Promise.all(activeTypesToLoad.map(async (ct) => {
         const [localRes, cloudRes] = await Promise.all([
           this.api.getItems(ct, this.accountHandle, 'local').catch(() => ({ items: [] })),
@@ -605,8 +734,9 @@ export class CloudConfigPanel {
         };
       }));
 
+      const visibleCategories = [];
+
       for (const { ct, localItems, cloudItems } of typeDataList) {
-        // 核心三类常驻；其余扩展类型若本地与云端均为空，则不展示空抽屉
         const isCoreType = ct === 'settings' || ct === 'openai_preset' || ct === 'world';
         if (!isCoreType && localItems.length === 0 && cloudItems.length === 0) {
           const oldDrawer = treeEl.querySelector(`.cfgsync-group-drawer[data-content-type="${ct}"]`);
@@ -614,7 +744,6 @@ export class CloudConfigPanel {
           continue;
         }
 
-        // 智能合并：既能在本地看到未同步项，也能在其它账号下看到已有云端备份
         const itemMap = new Map();
         for (const loc of localItems) {
           itemMap.set(loc.itemUid, {
@@ -631,7 +760,6 @@ export class CloudConfigPanel {
             const existing = itemMap.get(cld.item_uid);
             existing.cloudItem = cld;
           } else {
-            // 仅存在于云端（例如由其它账号如 default-user 备份），本地尚未下载
             itemMap.set(cld.item_uid, {
               itemUid: cld.item_uid,
               displayName: cld.display_name,
@@ -643,7 +771,6 @@ export class CloudConfigPanel {
         }
 
         const items = Array.from(itemMap.values());
-        // 智能排序：云端有数据的排在前面，未同步的排在后面；同组内部按中文拼音稳定字典序排序
         items.sort((a, b) => {
           const aHasCloud = Boolean(a.cloudItem);
           const bHasCloud = Boolean(b.cloudItem);
@@ -653,6 +780,14 @@ export class CloudConfigPanel {
           return (a.displayName || '').localeCompare(b.displayName || '', 'zh-CN');
         });
         const displayTypeName = ctNameMap[ct] || ct;
+        const cloudCount = items.filter(i => Boolean(i.cloudItem && !i.cloudItem.is_deleted)).length;
+        const totalCount = items.length;
+        visibleCategories.push({
+          ct,
+          displayTypeName,
+          cloudCount,
+          totalCount,
+        });
 
         let groupDrawer = treeEl.querySelector(`.cfgsync-group-drawer[data-content-type="${ct}"]`);
         if (!groupDrawer) {
@@ -661,6 +796,15 @@ export class CloudConfigPanel {
         }
 
         this.updateGroupDrawer(groupDrawer, ct, items, bindingMap);
+      }
+
+      if (visibleCategories.length > 0 && !visibleCategories.some(c => c.ct === this.activeTab)) {
+        this.activeTab = visibleCategories[0].ct;
+      }
+
+      this.renderCategoryTabs(visibleCategories);
+      if (this.activeTab) {
+        this.switchCategoryTab(this.activeTab);
       }
 
       if (loadingEl) loadingEl.style.display = 'none';
@@ -673,6 +817,46 @@ export class CloudConfigPanel {
       }
     } finally {
       this._refreshing = false;
+    }
+  }
+
+  /**
+   * 渲染顶部横向分类标签栏
+   */
+  renderCategoryTabs(visibleCategories) {
+    const tabsEl = this.container?.querySelector?.('#cfgsync-category-tabs');
+    if (!tabsEl) return;
+
+    tabsEl.innerHTML = '';
+    for (const { ct, displayTypeName, cloudCount, totalCount } of visibleCategories) {
+      const isActive = ct === this.activeTab;
+      const badgeText = totalCount > 0 ? (cloudCount > 0 ? `${cloudCount}/${totalCount}` : `${totalCount}`) : '0';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cfgsync-cat-tab-btn';
+      btn.dataset.tabType = ct;
+      btn.style.cssText = `
+        height: 28px; padding: 0 10px; margin: 0; border-radius: 5px; font-size: 12px;
+        font-weight: ${isActive ? '600' : '400'};
+        color: ${isActive ? '#f0f6fc' : '#8b949e'};
+        background: ${isActive ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.02)'};
+        border: 1px solid ${isActive ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.07)'};
+        display: inline-flex; align-items: center; gap: 6px; white-space: nowrap !important;
+        width: auto !important; min-width: unset !important; cursor: pointer; user-select: none;
+        transition: all 0.15s ease;
+      `;
+      btn.innerHTML = `
+        <span>${displayTypeName}</span>
+        <span class="cfgsync-tab-badge" style="font-size:12px; padding:0 5px; border-radius:6px; background:${isActive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)'}; color:${isActive ? '#e6edf3' : '#8b949e'};">${badgeText}</span>
+      `;
+      btn.onmousedown = (e) => e.stopPropagation();
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.switchCategoryTab(ct);
+      };
+      tabsEl.appendChild(btn);
     }
   }
 
@@ -707,47 +891,22 @@ export class CloudConfigPanel {
   }
 
   createGroupDrawer(ct, displayTypeName) {
-    const isExpanded = Boolean(this.drawerState.get(ct));
+    const isExpanded = ct === this.activeTab || Boolean(this.drawerState.get(ct));
     const groupDrawer = document.createElement('div');
     groupDrawer.className = 'cfgsync-group-drawer';
     groupDrawer.dataset.contentType = ct;
-    groupDrawer.style.cssText = 'margin-bottom: 7px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px; overflow: hidden; background: rgba(0, 0, 0, 0.12);';
+    groupDrawer.style.cssText = `display: ${ct === this.activeTab ? 'block' : 'none'};`;
 
     groupDrawer.innerHTML = `
-      <div class="inline-drawer-header cfgsync-drawer-toggle" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; background: rgba(255, 255, 255, 0.03); user-select: none; transition: background 0.15s ease;">
-        <div style="display: flex; align-items: center; gap: 7px;">
-          <b style="font-size: 12.5px; color: #40a9ff;">${displayTypeName}</b>
-          <span class="cfgsync-count-badge" style="font-size: 10.5px; padding: 0 6px; height: 17px; line-height: 17px; border-radius: 9px; background: rgba(255, 255, 255, 0.08); opacity: 0.6; font-weight: 500;">0</span>
-        </div>
-        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down ${isExpanded ? 'up' : 'down'}" style="transition: transform 0.15s ease-in-out; font-size: 13px; opacity: 0.7;"></div>
+      <div class="inline-drawer-header cfgsync-drawer-toggle" style="display: none;">
+        <b>${displayTypeName}</b>
+        <span class="cfgsync-count-badge">0</span>
+        <div class="inline-drawer-icon ${isExpanded ? 'up' : 'down'}"></div>
       </div>
-      <div class="cfgsync-drawer-content" style="display: ${isExpanded ? 'block' : 'none'}; padding: 5px 6px;">
-        <div class="cfgsync-group-items"></div>
+      <div class="cfgsync-drawer-content" style="display: block;">
+        <div class="cfgsync-group-items" style="display: flex; flex-direction: column; gap: 8px;"></div>
       </div>
     `;
-
-    const toggleBtn = groupDrawer.querySelector('.cfgsync-drawer-toggle');
-    const contentEl = groupDrawer.querySelector('.cfgsync-drawer-content');
-    const iconEl = groupDrawer.querySelector('.inline-drawer-icon');
-
-    toggleBtn.onmousedown = (e) => e.stopPropagation();
-    toggleBtn.onclick = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const isHidden = contentEl.style.display === 'none';
-      contentEl.style.display = isHidden ? 'block' : 'none';
-      this.drawerState.set(ct, isHidden);
-      if (isHidden) {
-        iconEl.classList.remove('down');
-        iconEl.classList.add('up');
-      } else {
-        iconEl.classList.remove('up');
-        iconEl.classList.add('down');
-      }
-    };
-
-    toggleBtn.onmouseenter = () => { toggleBtn.style.background = 'rgba(255, 255, 255, 0.06)'; };
-    toggleBtn.onmouseleave = () => { toggleBtn.style.background = 'rgba(255, 255, 255, 0.03)'; };
 
     return groupDrawer;
   }
@@ -756,27 +915,23 @@ export class CloudConfigPanel {
     const badgeEl = groupDrawer.querySelector('.cfgsync-count-badge');
     const cloudCount = items.filter(i => Boolean(i.cloudItem && !i.cloudItem.is_deleted)).length;
     const totalCount = items.length;
+    const badgeText = totalCount > 0 ? (cloudCount > 0 ? `${cloudCount}/${totalCount}` : `${totalCount}`) : '0';
 
     if (badgeEl) {
-      if (totalCount > 0) {
-        badgeEl.textContent = cloudCount > 0 ? `${cloudCount}/${totalCount}` : `${totalCount}`;
-        badgeEl.title = `共 ${totalCount} 项配置：${cloudCount} 项云端有数据，${totalCount - cloudCount} 项未同步`;
-        badgeEl.style.background = cloudCount > 0 ? 'rgba(24, 144, 255, 0.22)' : 'rgba(255, 255, 255, 0.08)';
-        badgeEl.style.color = cloudCount > 0 ? '#69c0ff' : '#8c8c8c';
-        badgeEl.style.opacity = '1';
-      } else {
-        badgeEl.textContent = '0';
-        badgeEl.style.background = 'rgba(255, 255, 255, 0.08)';
-        badgeEl.style.color = '';
-        badgeEl.style.opacity = '0.5';
-      }
+      badgeEl.textContent = badgeText;
+      badgeEl.title = `共 ${totalCount} 项配置：${cloudCount} 项云端有数据，${totalCount - cloudCount} 项未同步`;
+    }
+
+    const tabBadgeEl = this.container?.querySelector?.(`.cfgsync-cat-tab-btn[data-tab-type="${ct}"] .cfgsync-tab-badge`);
+    if (tabBadgeEl) {
+      tabBadgeEl.textContent = badgeText;
     }
 
     const itemsContainer = groupDrawer.querySelector('.cfgsync-group-items');
     if (!itemsContainer) return;
 
     if (items.length === 0) {
-      itemsContainer.innerHTML = `<div class="cfgsync-empty-notice" style="font-size:12px; opacity:0.6; padding: 6px 4px;">（暂无可用配置）</div>`;
+      itemsContainer.innerHTML = `<div class="cfgsync-empty-notice" style="font-size:12px; color:#8b949e; padding: 16px 4px; text-align:center;">暂无可用配置</div>`;
       return;
     }
 
@@ -787,22 +942,18 @@ export class CloudConfigPanel {
 
     const currentItemUids = new Set(items.map(i => i.itemUid));
 
-    // 移除已删除的项
     itemsContainer.querySelectorAll('.cfgsync-item-row').forEach(row => {
       if (!currentItemUids.has(row.dataset.itemUid)) {
         row.remove();
       }
     });
 
-    // 移除旧的子分隔线
     const oldDivider = itemsContainer.querySelector('.cfgsync-section-divider');
     if (oldDivider) oldDivider.remove();
 
-    // 动态判断是否需要渲染“本地未同步”子分隔栏（云端有数据与未同步两类并存时）
     const hasBoth = cloudCount > 0 && (totalCount - cloudCount) > 0;
     let dividerInserted = false;
 
-    // 依序排列/创建配置项
     for (const item of items) {
       const binding = bindingMap.get(`${ct}:${item.itemUid}`);
       const isUnsynced = !item.cloudItem || item.cloudItem.is_deleted;
@@ -811,17 +962,14 @@ export class CloudConfigPanel {
         const divider = document.createElement('div');
         divider.className = 'cfgsync-section-divider';
         divider.style.cssText = `
-          font-size: 11px; color: #8b949e; margin: 9px 4px 6px 4px;
-          padding-top: 6px; border-top: 1px dashed rgba(255, 255, 255, 0.1);
+          font-size: 12px; color: #8b949e; margin: 10px 2px 4px 2px;
+          padding-top: 8px; border-top: 1px dashed rgba(255, 255, 255, 0.1);
           display: flex; align-items: center; justify-content: space-between;
           user-select: none;
         `;
         divider.innerHTML = `
-          <span style="display:inline-flex; align-items:center; gap:5px;">
-            <i class="fa-solid fa-hard-drive" style="font-size:10px; color:#6e7681;"></i>
-            <span>本地未同步 (${totalCount - cloudCount})</span>
-          </span>
-          <span style="font-size:10px; opacity:0.6;">点击右侧上传直接备份</span>
+          <span>本地未同步 (${totalCount - cloudCount})</span>
+          <span style="opacity:0.6;">点击推送直接备份到云端</span>
         `;
         itemsContainer.appendChild(divider);
         dividerInserted = true;
@@ -830,7 +978,7 @@ export class CloudConfigPanel {
       let existingRow = itemsContainer.querySelector(`.cfgsync-item-row[data-item-uid="${item.itemUid}"]`);
       if (existingRow) {
         this.updateRowState(existingRow, binding, item.cloudItem, item.existsLocally);
-        itemsContainer.appendChild(existingRow); // 确保与排序后的 items 顺序一致
+        itemsContainer.appendChild(existingRow);
       } else {
         const newRow = this.createItemRow(ct, item, binding);
         itemsContainer.appendChild(newRow);
@@ -839,27 +987,25 @@ export class CloudConfigPanel {
   }
 
   /**
-   * 原地无感更新指定分类抽屉顶部的计数角标与统计描述
+   * 原地无感更新指定分类抽屉与顶部标签的计数角标
    */
   updateDrawerCount(contentType) {
     const groupDrawer = this.container?.querySelector(`.cfgsync-group-drawer[data-content-type="${contentType}"]`);
     if (!groupDrawer) return;
-    const badgeEl = groupDrawer.querySelector('.cfgsync-count-badge');
-    if (!badgeEl) return;
     const rows = Array.from(groupDrawer.querySelectorAll('.cfgsync-item-row'));
     const totalCount = rows.length;
     const cloudCount = rows.filter(r => r._cloudItem && !r._cloudItem.is_deleted).length;
-    if (totalCount > 0) {
-      badgeEl.textContent = cloudCount > 0 ? `${cloudCount}/${totalCount}` : `${totalCount}`;
+    const badgeText = totalCount > 0 ? (cloudCount > 0 ? `${cloudCount}/${totalCount}` : `${totalCount}`) : '0';
+
+    const badgeEl = groupDrawer.querySelector('.cfgsync-count-badge');
+    if (badgeEl) {
+      badgeEl.textContent = badgeText;
       badgeEl.title = `共 ${totalCount} 项配置：${cloudCount} 项云端有数据，${totalCount - cloudCount} 项未同步`;
-      badgeEl.style.background = cloudCount > 0 ? 'rgba(24, 144, 255, 0.22)' : 'rgba(255, 255, 255, 0.08)';
-      badgeEl.style.color = cloudCount > 0 ? '#69c0ff' : '#8c8c8c';
-      badgeEl.style.opacity = '1';
-    } else {
-      badgeEl.textContent = '0';
-      badgeEl.style.background = 'rgba(255, 255, 255, 0.08)';
-      badgeEl.style.color = '';
-      badgeEl.style.opacity = '0.5';
+    }
+
+    const tabBadgeEl = this.container?.querySelector?.(`.cfgsync-cat-tab-btn[data-tab-type="${contentType}"] .cfgsync-tab-badge`);
+    if (tabBadgeEl) {
+      tabBadgeEl.textContent = badgeText;
     }
   }
 
@@ -869,23 +1015,23 @@ export class CloudConfigPanel {
   getStateInfo(state, version, cloudItem = null, binding = null) {
     if (binding && binding.enabled && state === SyncState.SYNCED) {
       if (cloudItem && cloudItem.current_version > (binding.last_synced_version || 0)) {
-        return { color: '#faad14', label: '☁️ 有更新' };
+        return { color: '#e3b341', label: '有更新' };
       }
       const fromText = (binding.source_owner_handle && binding.source_owner_handle !== this.accountHandle) ? ` @${binding.source_owner_handle}` : '';
-      return { color: '#52c41a', label: `已同步${fromText}` };
+      return { color: '#c9d1d9', label: `已同步${fromText}` };
     }
     if (state === SyncState.CONFLICT) {
-      return { color: '#f5222d', label: '⚠️ 冲突' };
+      return { color: '#f85149', label: '冲突' };
     }
     if (state === SyncState.BACKUP_CREATED) {
-      return { color: '#1890ff', label: '冷备份' };
+      return { color: '#c9d1d9', label: '冷备份' };
     }
     if (cloudItem) {
       const isCross = cloudItem.owner_handle && cloudItem.owner_handle !== this.accountHandle;
       const ownerText = isCross ? ` @${cloudItem.owner_handle}` : '';
-      return { color: '#1890ff', label: `已备份${ownerText}` };
+      return { color: '#c9d1d9', label: `已备份${ownerText}` };
     }
-    return { color: '#8c8c8c', label: '未同步' };
+    return { color: '#8b949e', label: '未同步' };
   }
 
   /**
@@ -909,21 +1055,27 @@ export class CloudConfigPanel {
   }
 
   /**
-   * 为指定行渲染版本选择器的初始 HTML（方案 A：极简紧凑胶囊风）
-   * @returns {string} select 或 badge 的 HTML
+   * 为指定行渲染版本选择器的初始 HTML（统一克制配色，仅对冲突与未下载凸显）
+   * @returns {string} badge 或 button 的 HTML
    */
-  renderVersionSelectorHtml(state, version, cloudItem = null, binding = null) {
-    // 云端没有任何版本时，显示精致虚线小胶囊徽章
+  renderVersionSelectorHtml(state, version, cloudItem = null, binding = null, existsLocally = true) {
     if (!cloudItem) {
-      return `<span class="cfgsync-state-badge cfgsync-badge-unsynced" title="当前配置仅保存在本地，尚未备份到云端" style="display:inline-flex; align-items:center; justify-content:center; font-size:10.5px; height:22px; line-height:20px; box-sizing:border-box; padding:0 8px; border-radius:11px; background:transparent; border:1px dashed rgba(255,255,255,0.18); color:#8b949e; white-space:nowrap; user-select:none; letter-spacing:0.3px;"><i class="fa-solid fa-cloud-slash" style="font-size:9.5px; margin-right:4px; opacity:0.6;"></i>未同步</span>`;
+      return `<span class="cfgsync-state-badge cfgsync-badge-unsynced" title="当前配置仅保存在本地，尚未备份到云端" style="display:inline-flex; align-items:center; justify-content:center; font-size:12px; height:23px; line-height:21px; box-sizing:border-box; padding:0 8px; border-radius:4px; background:transparent; border:1px dashed rgba(255,255,255,0.14); color:#8b949e; white-space:nowrap; user-select:none; flex-shrink:0;">未同步</span>`;
     }
 
-    // 有云端版本时，显示方案 A 极简胶囊快照历史按钮（高对比云端蓝，无截断无白底白字）
     const isCross = cloudItem.owner_handle && cloudItem.owner_handle !== this.accountHandle;
-    const badgeLabel = isCross ? `@${cloudItem.owner_handle} ▾` : '历史快照 ▾';
+    const badgeLabel = state === SyncState.CONFLICT
+      ? '冲突 ▾'
+      : (isCross ? `@${cloudItem.owner_handle} ▾` : '历史快照 ▾');
 
-    return `<button class="cfgsync-history-badge-btn menu_button" type="button" title="点击查看与管理云端历史快照" style="display:inline-flex !important; align-items:center !important; gap:4px !important; font-size:10.5px !important; font-weight:600 !important; height:22px !important; line-height:20px !important; box-sizing:border-box !important; padding:0 8px !important; border-radius:11px !important; border:1px solid rgba(88,166,255,0.45) !important; background:rgba(31,111,235,0.18) !important; color:#58a6ff !important; cursor:pointer !important; outline:none !important; white-space:nowrap !important; transition:all 0.15s ease !important;">
-      <i class="fa-solid fa-cloud" style="font-size:10px;"></i>
+    let btnColorStyle = 'border:1px solid rgba(255,255,255,0.14) !important; background:rgba(255,255,255,0.06) !important; color:#c9d1d9 !important;';
+    if (state === SyncState.CONFLICT) {
+      btnColorStyle = 'border:1px solid rgba(248,81,73,0.45) !important; background:rgba(248,81,73,0.15) !important; color:#ff7b72 !important; font-weight:600 !important;';
+    } else if (!existsLocally || (binding?.enabled && cloudItem.current_version > (binding.last_synced_version || 0))) {
+      btnColorStyle = 'border:1px solid rgba(210,153,34,0.4) !important; background:rgba(210,153,34,0.12) !important; color:#e3b341 !important;';
+    }
+
+    return `<button class="cfgsync-history-badge-btn menu_button" type="button" title="点击查看与管理云端历史快照" style="display:inline-flex !important; align-items:center !important; justify-content:center !important; font-size:12px !important; height:23px !important; line-height:21px !important; box-sizing:border-box !important; padding:0 9px !important; margin:0 !important; width:auto !important; min-width:unset !important; border-radius:4px !important; ${btnColorStyle} cursor:pointer !important; outline:none !important; white-space:nowrap !important; flex-shrink:0 !important; transition:all 0.15s ease !important;">
       <span>${badgeLabel}</span>
     </button>`;
   }
@@ -937,10 +1089,10 @@ export class CloudConfigPanel {
       row._binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
     }
     const pullBtn = row.querySelector('.cfgsync-pull-btn');
-    const origHtml = pullBtn ? pullBtn.innerHTML : '';
+    const origHtml = pullBtn ? pullBtn.innerHTML : '拉取';
     if (pullBtn) {
       pullBtn.disabled = true;
-      pullBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+      pullBtn.textContent = '拉取中...';
     }
     try {
       const res = await this.syncManager.pullCloud(row._binding, null, targetVersion);
@@ -982,7 +1134,7 @@ export class CloudConfigPanel {
       await this.handleReloadStrategy(strategy, item, versionDesc, this.accountHandle, res);
     } catch (e) {
       if (e.status === 423 || e.data?.code === 'LOCKED') {
-        alert('【拉取已被防替换锁定保护拦截】\n\n当前配置已开启防替换锁定保护，阻止来自云端的覆盖！\n如需覆盖更新本地，请先点击行内的金色 🔒 图标解除锁定，然后再执行拉取。');
+        alert('【拉取已被防替换锁定保护拦截】\n\n当前配置已开启防替换锁定保护，阻止来自云端的覆盖！\n如需覆盖更新本地，请先解除锁定，然后再执行拉取。');
       } else {
         alert(`拉取失败: ${e.message}`);
       }
@@ -990,7 +1142,7 @@ export class CloudConfigPanel {
       if (pullBtn) {
         pullBtn.disabled = !row._cloudItem;
         pullBtn.innerHTML = origHtml;
-        pullBtn.style.opacity = row._cloudItem ? '0.9' : '0.35';
+        pullBtn.style.opacity = row._cloudItem ? '1' : '0.25';
       }
     }
   }
@@ -1114,52 +1266,57 @@ export class CloudConfigPanel {
     const isEnabled = Boolean(binding?.enabled);
     const state = binding?.state || (hasCloud ? 'CLOUD_AVAILABLE' : SyncState.DISABLED);
     const version = binding?.last_synced_version || cItem?.current_version;
-    const info = this.getStateInfo(state, version, hasCloud ? cItem : null, binding);
 
-    // 1. 行样式差异化呈现
+    // 1. 仅对异常或待处理状态凸显左边框颜色，其余保持克制中性色
+    let leftBorderColor = hasCloud ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.12)';
+    if (state === SyncState.CONFLICT) {
+      leftBorderColor = '#f85149';
+    } else if (hasCloud && !existsLocally) {
+      leftBorderColor = '#d29922';
+    }
+
     if (hasCloud) {
-      row._defaultBg = 'rgba(255, 255, 255, 0.05)';
-      row._hoverBg = 'rgba(255, 255, 255, 0.08)';
+      row._defaultBg = 'rgba(255, 255, 255, 0.035)';
+      row._hoverBg = 'rgba(255, 255, 255, 0.06)';
       row.style.background = row._defaultBg;
       row.style.border = '1px solid rgba(255, 255, 255, 0.08)';
-      row.style.borderLeft = '3px solid #1890ff';
+      row.style.borderLeft = `3px solid ${leftBorderColor}`;
     } else {
-      row._defaultBg = 'rgba(255, 255, 255, 0.02)';
-      row._hoverBg = 'rgba(255, 255, 255, 0.04)';
+      row._defaultBg = 'rgba(255, 255, 255, 0.015)';
+      row._hoverBg = 'rgba(255, 255, 255, 0.035)';
       row.style.background = row._defaultBg;
-      row.style.border = '1px dashed rgba(255, 255, 255, 0.12)';
-      row.style.borderLeft = '3px solid rgba(255, 255, 255, 0.2)';
+      row.style.border = '1px dashed rgba(255, 255, 255, 0.1)';
+      row.style.borderLeft = `3px solid ${leftBorderColor}`;
     }
 
-    // 1.5 动态更新左侧图标与文件名状态
-    const rowIcon = row.querySelector('.cfgsync-row-icon');
-    if (rowIcon) {
-      rowIcon.className = `cfgsync-row-icon ${hasCloud ? 'fa-solid fa-cloud' : 'fa-regular fa-file'}`;
-      rowIcon.style.color = hasCloud ? '#58a6ff' : 'rgba(255,255,255,0.3)';
-    }
+    // 1.5 动态更新名称与文件名状态
     const rowName = row.querySelector('.cfgsync-row-name');
-    if (rowName && rowName.parentElement) {
-      rowName.parentElement.style.fontWeight = hasCloud ? '600' : '400';
-      rowName.parentElement.style.color = hasCloud ? '#f0f6fc' : '#c9d1d9';
+    if (rowName) {
+      rowName.style.fontWeight = hasCloud ? '600' : '400';
+      rowName.style.color = hasCloud ? '#f0f6fc' : '#c9d1d9';
     }
     const rowRef = row.querySelector('.cfgsync-row-ref');
     if (rowRef) {
-      if (existsLocally) {
+      if (state === SyncState.CONFLICT) {
+        const baseRef = rowRef.dataset.sourceRef || rowRef.title || '';
+        rowRef.textContent = `${baseRef} · 云端版本冲突`;
+        rowRef.style.color = '#f85149';
+      } else if (existsLocally) {
         const baseRef = rowRef.dataset.sourceRef || rowRef.title || '';
         const cleanRef = baseRef.startsWith('来自云端') ? (row._itemDisplayName ? `${row._itemDisplayName}.json` : baseRef) : baseRef;
         rowRef.textContent = `${cleanRef}${!hasCloud ? ' · 仅本地' : ''}`;
-        rowRef.style.color = hasCloud ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)';
+        rowRef.style.color = hasCloud ? '#8b949e' : 'rgba(255,255,255,0.35)';
       } else {
         const owner = cItem?.owner_handle || '云端';
         rowRef.textContent = `来自云端 (@${owner}) · 本地未下载`;
-        rowRef.style.color = '#faad14';
+        rowRef.style.color = '#e3b341';
       }
     }
 
     // 2. 状态徽章与历史浮层
     const badgeContainer = row.querySelector('.cfgsync-state-badge-container');
     if (badgeContainer) {
-      badgeContainer.innerHTML = this.renderVersionSelectorHtml(state, version, hasCloud ? cItem : null, binding);
+      badgeContainer.innerHTML = this.renderVersionSelectorHtml(state, version, hasCloud ? cItem : null, binding, existsLocally);
       if (hasCloud) {
         const historyBtn = badgeContainer.querySelector('.cfgsync-history-badge-btn');
         if (historyBtn) {
@@ -1188,31 +1345,18 @@ export class CloudConfigPanel {
       }
     }
 
-    // 3. 按钮状态与视觉区分
+    // 3. 按钮状态（统一中性按钮配色）
     const pullBtn = row.querySelector('.cfgsync-pull-btn');
     if (pullBtn) {
       pullBtn.disabled = !hasCloud;
       if (!hasCloud) {
-        pullBtn.style.opacity = '0.15';
+        pullBtn.style.opacity = '0.25';
         pullBtn.style.pointerEvents = 'none';
-        pullBtn.style.background = 'transparent';
-        pullBtn.style.borderColor = 'rgba(255,255,255,0.12)';
-        pullBtn.style.color = 'rgba(255,255,255,0.3)';
         pullBtn.title = '云端暂无可拉取的备份';
-      } else if (!existsLocally) {
+      } else {
         pullBtn.style.opacity = '1';
         pullBtn.style.pointerEvents = 'auto';
-        pullBtn.style.background = 'rgba(46, 160, 67, 0.22) !important';
-        pullBtn.style.border = '1px solid rgba(46, 160, 67, 0.5) !important';
-        pullBtn.style.color = '#52c41a !important';
-        pullBtn.title = '从云端拉取此配置保存到本地 (生成本地副本)';
-      } else {
-        pullBtn.style.opacity = '0.85';
-        pullBtn.style.pointerEvents = 'auto';
-        pullBtn.style.background = 'transparent';
-        pullBtn.style.border = '1px solid rgba(255,255,255,0.14)';
-        pullBtn.style.color = '#c9d1d9';
-        pullBtn.title = '重新从云端拉取此配置覆盖本地';
+        pullBtn.title = !existsLocally ? '从云端拉取此配置保存到本地 (生成本地副本)' : '重新从云端拉取此配置覆盖本地';
       }
     }
 
@@ -1223,35 +1367,23 @@ export class CloudConfigPanel {
         pushBtn.style.opacity = '0.25';
         pushBtn.style.pointerEvents = 'none';
         pushBtn.title = '本地不存在此文件 (请先点击左侧拉取)';
-      } else if (!hasCloud) {
-        // 未同步项：强调“推送到云端”为首要行动点 (CTA)
+      } else {
         pushBtn.style.opacity = '1';
         pushBtn.style.pointerEvents = 'auto';
-        pushBtn.style.background = 'rgba(31, 111, 235, 0.22) !important';
-        pushBtn.style.border = '1px solid rgba(88, 166, 255, 0.5) !important';
-        pushBtn.style.color = '#58a6ff !important';
-        pushBtn.title = '未同步：立即推送到云端生成首个快照';
-      } else {
-        pushBtn.style.opacity = '0.9';
-        pushBtn.style.pointerEvents = 'auto';
-        pushBtn.style.background = '';
-        pushBtn.style.border = '';
-        pushBtn.style.color = '';
-        pushBtn.title = '推送到云端 (上传新快照覆盖云端)';
+        pushBtn.title = hasCloud ? '推送到云端 (上传新快照覆盖云端)' : '未同步：立即推送到云端生成首个快照';
       }
     }
-
 
     const shareBtn = row.querySelector('.cfgsync-share-btn');
     if (shareBtn) {
       shareBtn.disabled = !hasCloud;
       if (!hasCloud) {
-        shareBtn.style.opacity = '0.15';
+        shareBtn.style.opacity = '0.25';
         shareBtn.style.pointerEvents = 'none';
         shareBtn.style.cursor = 'not-allowed';
         shareBtn.title = '尚未推送到云端，无法分享';
       } else {
-        shareBtn.style.opacity = '0.9';
+        shareBtn.style.opacity = '1';
         shareBtn.style.pointerEvents = 'auto';
         shareBtn.style.cursor = 'pointer';
         shareBtn.title = '分享配置 (生成邀请码 / 设为公开)';
@@ -1269,24 +1401,10 @@ export class CloudConfigPanel {
     row.className = 'cfgsync-item-row';
     row.dataset.itemUid = item.itemUid;
     row.dataset.contentType = contentType;
+    row.dataset.displayName = item.displayName || '';
 
     const cItem = item.cloudItem || null;
     const hasCloud = Boolean(cItem && !cItem.is_deleted);
-
-    row._defaultBg = hasCloud ? 'rgba(255, 255, 255, 0.05)' : 'rgba(255, 255, 255, 0.02)';
-    row._hoverBg = hasCloud ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.04)';
-
-    row.style.cssText = `
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 6px 8px; margin-bottom: 4px; border-radius: 6px;
-      background: ${row._defaultBg};
-      border: ${hasCloud ? '1px solid rgba(255, 255, 255, 0.08)' : '1px dashed rgba(255, 255, 255, 0.12)'};
-      border-left: ${hasCloud ? '3px solid #1890ff' : '3px solid rgba(255, 255, 255, 0.2)'};
-      gap: 8px;
-      transition: background 0.15s ease;
-    `;
-    row.onmouseenter = () => { row.style.background = row._hoverBg; };
-    row.onmouseleave = () => { row.style.background = row._defaultBg; };
 
     row._binding = initialBinding;
     row._cloudItem = cItem;
@@ -1299,77 +1417,77 @@ export class CloudConfigPanel {
     const isLocked = Boolean(cItem?.is_locked !== undefined ? cItem.is_locked : item.is_locked);
     row._isLocked = isLocked;
 
-    const lockOwnerTip = (cItem?.owner_handle && cItem.owner_handle !== this.accountHandle) ? `来自 @${cItem.owner_handle} 的配置` : '此配置';
-
-    let iconOrAvatarHtml = '';
-    if (contentType === 'character') {
-      const avatarSrc = `/characters/${encodeURIComponent(item.sourceRef || item.displayName + '.png')}`;
-      iconOrAvatarHtml = `
-        <div style="width:20px; height:20px; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; border-radius:3px; overflow:hidden; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);">
-          <img class="cfgsync-char-avatar" src="${avatarSrc}" alt="" style="width:100%; height:100%; object-fit:cover; display:block;" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='inline-flex';" />
-          <i class="cfgsync-char-fallback fa-solid fa-user-ninja" style="display:none; font-size:11px; color:#58a6ff;"></i>
-        </div>
-      `;
-    } else if (contentType === 'theme') {
-      iconOrAvatarHtml = `<i class="fa-solid fa-palette" style="font-size:12px; color:#d48806; flex-shrink:0;"></i>`;
-    } else if (contentType === 'chat') {
-      iconOrAvatarHtml = `<i class="fa-solid fa-comments" style="font-size:11px; color:#a371f7; flex-shrink:0;"></i>`;
-    } else if (contentType === 'group_chat') {
-      iconOrAvatarHtml = `<i class="fa-solid fa-users-line" style="font-size:11px; color:#ff7875; flex-shrink:0;"></i>`;
-    } else if (contentType === 'background') {
-      iconOrAvatarHtml = `<i class="fa-solid fa-image" style="font-size:11px; color:#ff7a45; flex-shrink:0;"></i>`;
-    } else if (contentType === 'persona') {
-      iconOrAvatarHtml = `<i class="fa-solid fa-id-badge" style="font-size:11px; color:#36cfc9; flex-shrink:0;"></i>`;
-    } else if (contentType === 'avatar') {
-      iconOrAvatarHtml = `<i class="fa-solid fa-circle-user" style="font-size:11px; color:#9254de; flex-shrink:0;"></i>`;
-    } else if (contentType === 'group') {
-      iconOrAvatarHtml = `<i class="fa-solid fa-users" style="font-size:11px; color:#597ef7; flex-shrink:0;"></i>`;
-    } else if (contentType === 'sprites') {
-      iconOrAvatarHtml = `<i class="fa-solid fa-masks-theater" style="font-size:11px; color:#ffc53d; flex-shrink:0;"></i>`;
-    } else if (contentType === 'settings') {
-      iconOrAvatarHtml = `<i class="fa-solid fa-sliders" style="font-size:11px; color:#79c0ff; flex-shrink:0;"></i>`;
-    } else if (contentType === 'world') {
-      iconOrAvatarHtml = `<i class="fa-solid fa-book-atlas" style="font-size:11px; color:#7ee787; flex-shrink:0;"></i>`;
-    } else {
-      iconOrAvatarHtml = `<i class="cfgsync-row-icon ${hasCloud ? 'fa-solid fa-cloud' : 'fa-regular fa-file'}" style="font-size:11px; color:${hasCloud ? '#58a6ff' : 'rgba(255,255,255,0.3)'}; flex-shrink:0;"></i>`;
+    let leftBorderColor = hasCloud ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.12)';
+    let subTextColor = hasCloud ? '#8b949e' : 'rgba(255, 255, 255, 0.35)';
+    if (state === SyncState.CONFLICT) {
+      leftBorderColor = '#f85149';
+      subTextColor = '#f85149';
+    } else if (hasCloud && !row._existsLocally) {
+      leftBorderColor = '#d29922';
+      subTextColor = '#e3b341';
     }
 
+    row._defaultBg = hasCloud ? 'rgba(255, 255, 255, 0.035)' : 'rgba(255, 255, 255, 0.015)';
+    row._hoverBg = hasCloud ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.035)';
+
+    row.style.cssText = `
+      display: flex; flex-direction: column; gap: 7px;
+      padding: 10px 12px; border-radius: 6px;
+      background: ${row._defaultBg};
+      border: ${hasCloud ? '1px solid rgba(255, 255, 255, 0.08)' : '1px dashed rgba(255, 255, 255, 0.1)'};
+      border-left: 3px solid ${leftBorderColor};
+      transition: background 0.15s ease;
+    `;
+    row.onmouseenter = () => { row.style.background = row._hoverBg; };
+    row.onmouseleave = () => { row.style.background = row._defaultBg; };
+
+    let avatarHtml = '';
+    if (contentType === 'character') {
+      const avatarSrc = `/characters/${encodeURIComponent(item.sourceRef || item.displayName + '.png')}`;
+      avatarHtml = `
+        <div style="width:20px; height:20px; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; border-radius:3px; overflow:hidden; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);">
+          <img class="cfgsync-char-avatar" src="${avatarSrc}" alt="" style="width:100%; height:100%; object-fit:cover; display:block;" onerror="this.style.display='none';" />
+        </div>
+      `;
+    }
+
+    const rowBtnStyle = 'white-space:nowrap !important; width:auto !important; min-width:unset !important; max-width:unset !important; height:25px !important; padding:0 10px !important; margin:0 !important; font-size:12px !important; font-weight:400 !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; background:rgba(255,255,255,0.04) !important; border:1px solid rgba(255,255,255,0.1) !important; color:#c9d1d9 !important; transition:all 0.12s ease !important;';
+
+    const refText = !row._existsLocally
+      ? `来自云端 (@${cItem?.owner_handle || '云端'}) · 本地未下载`
+      : `${item.sourceRef}${!hasCloud ? ' · 仅本地' : ''}`;
+
     row.innerHTML = `
-      <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1;">
-        <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} title="${isEnabled ? '已开启云同步 (取消勾选停用)' : (hasCloud ? '勾选开启自动同步' : '未同步：勾选后可在推送时自动关联同步')}" style="cursor:pointer; flex-shrink:0; width:15px; height:15px; margin:0; accent-color:#1890ff;" />
-        <div style="min-width:0; flex:1; overflow:hidden; display:flex; flex-direction:column; gap:1px;">
-          <div title="${item.displayName}" style="font-size:12.5px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? '#f0f6fc' : '#c9d1d9'}; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:flex; align-items:center; gap:6px;">
-            ${iconOrAvatarHtml}
-            ${(contentType === 'chat' || contentType === 'group_chat') && (item.characterName || (item.sourceRef && item.sourceRef.includes('/'))) ? `
-              <span class="cfgsync-chat-char-tag" style="background:rgba(88,166,255,0.18); color:#58a6ff; font-size:10.5px; padding:1px 5px; border-radius:3px; border:1px solid rgba(88,166,255,0.3); font-weight:normal; flex-shrink:0;">${item.characterName || item.sourceRef.split('/')[0]}</span>
-              <span class="cfgsync-row-name" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.chatName || (item.displayName && item.displayName.includes(' / ') ? item.displayName.split(' / ').slice(1).join(' / ') : item.displayName)}</span>
-            ` : `
-              <span class="cfgsync-row-name" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.displayName}</span>
-            `}
-          </div>
-          <div class="cfgsync-row-ref" data-source-ref="${item.sourceRef}" title="${item.sourceRef}" style="font-size:10.5px; line-height:1.2; color:${hasCloud ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.3)'}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; padding-left: 26px;">${item.sourceRef}${!hasCloud ? ' · 仅本地' : ''}</div>
+      <!-- 上层：复选框 + 完整配置名称 + 状态/快照胶囊 -->
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; min-width:0;">
+        <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1; overflow:hidden;">
+          <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} title="${isEnabled ? '已开启云同步 (取消勾选停用)' : (hasCloud ? '勾选开启自动同步' : '未同步：勾选后可在推送时自动关联同步')}" style="cursor:pointer; flex-shrink:0; width:15px; height:15px; margin:0; accent-color:#58a6ff;" />
+          ${avatarHtml}
+          ${(contentType === 'chat' || contentType === 'group_chat') && (item.characterName || (item.sourceRef && item.sourceRef.includes('/'))) ? `
+            <span class="cfgsync-chat-char-tag" style="background:rgba(255,255,255,0.08); color:#c9d1d9; font-size:12px; padding:1px 6px; border-radius:3px; border:1px solid rgba(255,255,255,0.14); font-weight:normal; flex-shrink:0;">${item.characterName || item.sourceRef.split('/')[0]}</span>
+            <span class="cfgsync-row-name" title="${item.displayName}" style="font-size:13px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? '#f0f6fc' : '#c9d1d9'}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.chatName || (item.displayName && item.displayName.includes(' / ') ? item.displayName.split(' / ').slice(1).join(' / ') : item.displayName)}</span>
+          ` : `
+            <span class="cfgsync-row-name" title="${item.displayName}" style="font-size:13px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? '#f0f6fc' : '#c9d1d9'}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.displayName}</span>
+          `}
+        </div>
+        <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">
+          ${this.renderVersionSelectorHtml(state, version, hasCloud ? cItem : null, initialBinding, row._existsLocally)}
         </div>
       </div>
-      <div style="display:flex; align-items:center; gap:5px; flex-shrink:0;">
-        <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">
-          ${this.renderVersionSelectorHtml(state, version, hasCloud ? cItem : null, initialBinding)}
+
+      <!-- 下层：左侧文件来源说明 + 右侧操作按钮组 -->
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding-left:23px; min-width:0;">
+        <div class="cfgsync-row-ref" data-source-ref="${item.sourceRef}" title="${item.sourceRef}" style="font-size:12px; color:${subTextColor}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; min-width:0; flex:1;">${refText}</div>
+        <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+          <button class="cfgsync-pull-btn menu_button" type="button" title="${!row._existsLocally ? '从云端拉取此配置保存到本地 (生成本地副本)' : '重新从云端拉取此配置覆盖本地'}" style="${rowBtnStyle} ${!hasCloud ? 'opacity:0.25 !important; pointer-events:none !important;' : 'cursor:pointer !important;'}">拉取</button>
+          <button class="cfgsync-push-btn menu_button" type="button" title="${hasCloud ? '推送到云端 (上传新快照覆盖云端)' : '未同步：立即推送到云端生成首个快照'}" style="${rowBtnStyle} ${!row._existsLocally ? 'opacity:0.25 !important; pointer-events:none !important;' : 'cursor:pointer !important;'}">推送</button>
+          ${contentType !== 'chat' && contentType !== 'group_chat' && (contentType !== 'settings' || this._allowSettingsSharing) ? `
+          <button class="cfgsync-share-btn menu_button" type="button" title="${hasCloud ? (contentType === 'settings' ? '家庭共享设置 (生成专属邀请码 / 安全注入 API Key)' : '分享配置 (生成邀请码 / 设为公开)') : '尚未推送到云端，无法分享'}" style="${rowBtnStyle} ${!hasCloud ? 'opacity:0.25 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'cursor:pointer !important;'}">分享</button>
+          ` : ''}
+          ${contentType !== 'settings' ? `
+          <button class="cfgsync-delete-btn menu_button" type="button" title="删除配置 (云端备份 / 本地文件)" style="${rowBtnStyle} cursor:pointer !important;">删除</button>
+          ` : ''}
         </div>
-        <button class="cfgsync-pull-btn menu_button" title="${!row._existsLocally ? '从云端拉取此配置保存到本地 (生成本地副本)' : '重新从云端拉取此配置覆盖本地'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important;' : (!row._existsLocally ? 'opacity:1 !important; background:rgba(46,160,67,0.22) !important; border:1px solid rgba(46,160,67,0.5) !important; color:#52c41a !important;' : 'opacity:0.85 !important; background:transparent !important; border:1px solid rgba(255,255,255,0.14) !important; color:#c9d1d9 !important;')}">
-          <i class="fa-solid fa-cloud-arrow-down"></i>
-        </button>
-        <button class="cfgsync-push-btn menu_button" title="${hasCloud ? '推送到云端 (上传新快照覆盖云端)' : '未同步：立即推送到云端生成首个快照'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; ${!row._existsLocally ? 'opacity:0.25 !important; pointer-events:none;' : (!hasCloud ? 'opacity:1 !important; background:rgba(31,111,235,0.22) !important; border:1px solid rgba(88,166,255,0.5) !important; color:#58a6ff !important;' : 'opacity:0.9;')}">
-          <i class="fa-solid fa-cloud-arrow-up"></i>
-        </button>
-        ${contentType !== 'chat' && contentType !== 'group_chat' && (contentType !== 'settings' || this._allowSettingsSharing) ? `
-        <button class="cfgsync-share-btn menu_button" title="${hasCloud ? (contentType === 'settings' ? '家庭共享设置 (生成专属邀请码 / 安全注入 API Key)' : '分享配置 (生成邀请码 / 设为公开)') : '尚未推送到云端，无法分享'}" style="white-space:nowrap !important; width:26px !important; min-width:26px !important; max-width:26px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; ${!hasCloud ? 'opacity:0.15 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'opacity:0.9; cursor:pointer !important;'}">
-          <i class="fa-solid fa-share-nodes"></i>
-        </button>
-        ` : ''}
-        ${contentType !== 'settings' ? `
-        <button class="cfgsync-delete-btn menu_button" title="删除配置 (云端备份 / 本地文件)" style="white-space:nowrap !important; width:24px !important; min-width:24px !important; max-width:24px !important; height:24px !important; padding:0 !important; font-size:11px !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; cursor:pointer !important; border-radius:4px !important; background:transparent; border:1px solid rgba(255,255,255,0.12); color:rgba(255,255,255,0.4); transition:all 0.15s ease;">
-          <i class="fa-regular fa-trash-can"></i>
-        </button>
-        ` : ''}
       </div>
     `;
 
@@ -1436,7 +1554,6 @@ export class CloudConfigPanel {
           const binding = await this.syncManager.enableSync(this.accountHandle, contentType, item.itemUid, item.displayName, null, sourceOwner);
           row._binding = binding;
           if (!row._existsLocally && hasCloud) {
-            // 本地尚无文件：开启同步时顺带拉取至本地，避免空开启导致酒馆内看不到
             await this.restoreSnapshot(row, contentType, item);
           } else {
             this.updateRowState(row, binding, row._cloudItem, row._existsLocally);
@@ -1473,7 +1590,7 @@ export class CloudConfigPanel {
           }
           pushBtn.disabled = true;
           const origHtml = pushBtn.innerHTML;
-          pushBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+          pushBtn.textContent = '推送中...';
           try {
             let localPayload = null;
             if (contentType === 'settings' && typeof window !== 'undefined') {
@@ -1487,7 +1604,7 @@ export class CloudConfigPanel {
 
             const res = await this.syncManager.pushLocal(row._binding, localPayload, {
               versionTitle,
-              force: true, // 网盘式快照直传
+              force: true,
               excludeHeavy: pushOptions?.excludeHeavy,
             });
             if (res.conflict) {
@@ -1501,7 +1618,6 @@ export class CloudConfigPanel {
                 },
               });
             } else {
-              // 乐观无感更新：原地更新行内状态、徽章与抽屉计数，绝不触发全页面或抽屉刷新抖动
               row._existsLocally = true;
               row._cloudItem = {
                 owner_handle: this.accountHandle,
@@ -1527,12 +1643,11 @@ export class CloudConfigPanel {
           } finally {
             pushBtn.disabled = !row._existsLocally;
             pushBtn.innerHTML = origHtml;
-            pushBtn.style.opacity = row._existsLocally ? '0.9' : '0.35';
+            pushBtn.style.opacity = row._existsLocally ? '1' : '0.25';
           }
         },
       });
     };
-
 
     // 分享配置（专属邀请码 / 全服公开）
     const shareBtn = row.querySelector('.cfgsync-share-btn');
@@ -1555,14 +1670,14 @@ export class CloudConfigPanel {
     const deleteBtn = row.querySelector('.cfgsync-delete-btn');
     if (deleteBtn) {
       deleteBtn.onmouseenter = () => {
-        deleteBtn.style.color = '#f85149';
-        deleteBtn.style.borderColor = 'rgba(248,81,73,0.4)';
-        deleteBtn.style.background = 'rgba(248,81,73,0.1)';
+        deleteBtn.style.setProperty('color', '#f85149', 'important');
+        deleteBtn.style.setProperty('border-color', 'rgba(248,81,73,0.4)', 'important');
+        deleteBtn.style.setProperty('background', 'rgba(248,81,73,0.1)', 'important');
       };
       deleteBtn.onmouseleave = () => {
-        deleteBtn.style.color = 'rgba(255,255,255,0.4)';
-        deleteBtn.style.borderColor = 'rgba(255,255,255,0.12)';
-        deleteBtn.style.background = 'transparent';
+        deleteBtn.style.setProperty('color', '#c9d1d9', 'important');
+        deleteBtn.style.setProperty('border-color', 'rgba(255,255,255,0.1)', 'important');
+        deleteBtn.style.setProperty('background', 'rgba(255,255,255,0.04)', 'important');
       };
       deleteBtn.onmousedown = (e) => e.stopPropagation();
       deleteBtn.onclick = (e) => {
@@ -1584,7 +1699,6 @@ export class CloudConfigPanel {
             const bindingUid = this.storage.makeBindingUid(this.accountHandle, sourceOwner, contentType, item.itemUid);
             await this.storage.deleteBinding(bindingUid).catch(() => {});
 
-            // 原地乐观更新，无需慢速重载整个面板
             if (deleteCloud && (deleteLocal || !row._existsLocally)) {
               row.style.transition = 'all 0.2s ease';
               row.style.opacity = '0';
@@ -1626,14 +1740,13 @@ export class CloudConfigPanel {
     btn.style.background = isLocked ? 'rgba(250, 173, 20, 0.18)' : 'transparent';
     btn.style.borderColor = isLocked ? 'rgba(250, 173, 20, 0.45)' : 'rgba(255, 255, 255, 0.12)';
     btn.style.color = isLocked ? '#faad14' : 'rgba(255, 255, 255, 0.4)';
-    btn.innerHTML = `<i class="fa-solid ${isLocked ? 'fa-lock' : 'fa-lock-open'}"></i>`;
   }
 
   renderServerErrorNotice() {
     this.container.innerHTML = `
-      <div style="box-sizing: border-box; width: 100%; background: #1c181a; border: 1px solid rgba(255, 77, 79, 0.4); border-left: 4px solid #ff4d4f; border-radius: 6px; padding: 12px; margin: 4px 0; color: #f5f5f5;">
-        <div style="color: #ff4d4f; font-weight: 600; font-size: 13px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
-          <span>⚠️</span> 服务端插件未就绪
+      <div style="box-sizing: border-box; width: 100%; background: #1c181a; border: 1px solid rgba(248, 81, 73, 0.4); border-left: 4px solid #f85149; border-radius: 6px; padding: 14px 16px; margin: 4px 0; color: #f5f5f5;">
+        <div style="color: #f85149; font-weight: 600; font-size: 13px; margin-bottom: 8px;">
+          服务端插件未就绪
         </div>
         <div style="font-size: 12px; line-height: 1.6; margin-bottom: 8px; color: #d0d0d0;">
           当前仅加载了前端扩展，SillyTavern 后端尚未激活插件路由。请按以下步骤启用：
@@ -1644,7 +1757,7 @@ export class CloudConfigPanel {
           <li>重启 SillyTavern 服务端。</li>
         </ol>
         <button class="menu_button cfgsync-retry-btn" style="width: 100%; padding: 6px; font-size: 12px; cursor: pointer;">
-          🔄 重新检测服务状态
+          重新检测服务状态
         </button>
       </div>
     `;

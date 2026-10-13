@@ -95,4 +95,43 @@ test('Step 3: Character / Theme UI & Sequential One-Click Backup', async (t) => 
     delete globalThis.confirm;
     delete globalThis.alert;
   });
+
+  await t.test('standalone modal open/close, category tab switching, and semantic status badges', () => {
+    const panel = new CloudConfigPanel({
+      api: {},
+      syncManager: {},
+      storage: {},
+      accountHandle: 'alice',
+    });
+
+    panel.refresh = async () => {};
+    panel.modalBackdrop = { style: { display: 'none' } };
+
+    panel.openModal();
+    assert.equal(panel.modalBackdrop.style.display, 'flex');
+
+    panel.closeModal();
+    assert.equal(panel.modalBackdrop.style.display, 'none');
+
+    panel.switchCategoryTab('openai_preset');
+    assert.equal(panel.activeTab, 'openai_preset');
+    assert.equal(panel.drawerState.get('openai_preset'), true);
+
+    // 验证未同步、正常快照、冲突、未下载四种状态胶囊样式
+    const unsyncedHtml = panel.renderVersionSelectorHtml('DISABLED', 0, null, null, true);
+    assert.ok(unsyncedHtml.includes('未同步'));
+
+    const normalHtml = panel.renderVersionSelectorHtml('SYNCED', 2, { owner_handle: 'alice', current_version: 2 }, { enabled: true, last_synced_version: 2 }, true);
+    assert.ok(normalHtml.includes('历史快照 ▾'));
+    assert.ok(normalHtml.includes('color:#c9d1d9'));
+
+    const conflictHtml = panel.renderVersionSelectorHtml('CONFLICT', 2, { owner_handle: 'alice', current_version: 3 }, { enabled: true, last_synced_version: 2 }, true);
+    assert.ok(conflictHtml.includes('冲突 ▾'));
+    assert.ok(conflictHtml.includes('color:#ff7b72'));
+
+    const unpulledHtml = panel.renderVersionSelectorHtml('CLOUD_AVAILABLE', 1, { owner_handle: 'bob', current_version: 1 }, null, false);
+    assert.ok(unpulledHtml.includes('@bob ▾'));
+    assert.ok(unpulledHtml.includes('color:#e3b341'));
+  });
 });
+

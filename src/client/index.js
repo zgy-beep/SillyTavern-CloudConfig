@@ -79,7 +79,7 @@ export async function initExtension() {
     drawerContainer.innerHTML = `
       <div class="inline-drawer" style="box-sizing: border-box; width: 100%;">
         <div class="inline-drawer-toggle inline-drawer-header">
-          <b>☁️ 配置云同步</b>
+          <b>配置云同步</b>
           <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content" style="display: none; box-sizing: border-box; width: 100%; padding: 8px 10px;">
