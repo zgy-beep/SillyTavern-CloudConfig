@@ -20,14 +20,16 @@ export class ChangeEventBus {
       FROM change_events e
       WHERE e.seq > :since
         AND (
-          e.owner_handle = :requester
+          LOWER(e.owner_handle) = LOWER(:requester)
           OR (
-            (e.content_type <> 'settings' OR :allowSettingsSharing = 1)
+            e.content_type <> 'group_chat'
+            AND (e.content_type <> 'settings' OR :allowSettingsSharing = 1)
             AND EXISTS (
               SELECT 1 FROM share_grants g
-              WHERE g.owner_handle = e.owner_handle
-                AND (g.grantee_handle = :requester OR (g.is_public = 1 AND g.grantee_handle IS NULL))
+              WHERE LOWER(g.owner_handle) = LOWER(e.owner_handle)
+                AND (LOWER(g.grantee_handle) = LOWER(:requester) OR (g.is_public = 1 AND g.grantee_handle IS NULL))
                 AND g.content_type = e.content_type
+                AND g.content_type <> 'group_chat'
                 AND (g.content_type <> 'settings' OR :allowSettingsSharing = 1)
                 AND g.status = 'active'
                 AND (g.expires_at IS NULL OR g.expires_at > :now)

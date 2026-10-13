@@ -543,13 +543,38 @@ export function createPluginRouter({
       inject_secrets: injectSecrets = false,
     } = req.body;
 
+    const isEnabled = enabled === true || enabled === 'true';
     const result = shares.setPublicShare(req.authContext, {
       contentType,
       itemUid,
       scopeType,
-      enabled: enabled === true || enabled === 'true',
+      enabled: isEnabled,
       injectSecrets: injectSecrets === true || injectSecrets === 'true',
     });
+
+    if (isEnabled && itemUid && changeBus && syncService?.db) {
+      try {
+        const rec = syncService.db.prepare(
+          'SELECT current_version FROM config_records WHERE LOWER(owner_handle) = LOWER(:owner) AND content_type = :ct AND item_uid = :uid AND is_deleted = 0 LIMIT 1'
+        ).get({
+          ':owner': req.authContext.handle,
+          ':ct': contentType,
+          ':uid': itemUid,
+        });
+        const ver = rec?.current_version || 1;
+        const seq = changeBus.recordEvent(req.authContext.handle, contentType, itemUid, ver, 'UPSERT');
+        sse.broadcastEvent({
+          seq: seq || Date.now(),
+          owner_handle: req.authContext.handle,
+          content_type: contentType,
+          item_uid: itemUid,
+          version: ver,
+          operation: 'UPSERT',
+          created_at: Date.now(),
+        });
+      } catch {}
+    }
+
     res.json(result);
   }));
 

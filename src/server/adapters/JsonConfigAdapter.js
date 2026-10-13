@@ -21,7 +21,8 @@ export class JsonConfigAdapter extends ConfigAdapter {
   }
 
   deserialize(buffer, mimeType = 'application/json') {
-    const text = buffer.toString('utf8');
+    let text = buffer.toString('utf8');
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
     return JSON.parse(text);
   }
 
@@ -54,7 +55,8 @@ export class JsonConfigAdapter extends ConfigAdapter {
    */
   async safeReadJson(filePath) {
     try {
-      const text = await fs.readFile(filePath, 'utf8');
+      let text = await fs.readFile(filePath, 'utf8');
+      if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
       return JSON.parse(text);
     } catch (err) {
       if (err.code === 'ENOENT') {

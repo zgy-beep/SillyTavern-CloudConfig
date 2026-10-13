@@ -112,7 +112,7 @@ export class SseService {
 
     for (const client of this.clients) {
       // 1. 本人始终可见自身产生的变更
-      if (client.handle === owner) {
+      if (client.handle && owner && client.handle.toLowerCase() === owner.toLowerCase()) {
         this.sendToClient(client, event);
         continue;
       }

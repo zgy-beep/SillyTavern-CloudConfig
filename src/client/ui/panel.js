@@ -30,6 +30,7 @@ export class CloudConfigPanel {
     this._refreshing = false;
     this._allowSettingsSharing = false;
     this.thumbnailCache = new Map();
+    this.drawerState = new Map();
   }
 
 
@@ -506,6 +507,9 @@ export class CloudConfigPanel {
             icon.classList.add('down');
           }
         }
+        if (drawer.dataset.contentType) {
+          this.drawerState.set(drawer.dataset.contentType, allExpanded);
+        }
       });
     };
   }
@@ -703,6 +707,7 @@ export class CloudConfigPanel {
   }
 
   createGroupDrawer(ct, displayTypeName) {
+    const isExpanded = Boolean(this.drawerState.get(ct));
     const groupDrawer = document.createElement('div');
     groupDrawer.className = 'cfgsync-group-drawer';
     groupDrawer.dataset.contentType = ct;
@@ -714,9 +719,9 @@ export class CloudConfigPanel {
           <b style="font-size: 12.5px; color: #40a9ff;">${displayTypeName}</b>
           <span class="cfgsync-count-badge" style="font-size: 10.5px; padding: 0 6px; height: 17px; line-height: 17px; border-radius: 9px; background: rgba(255, 255, 255, 0.08); opacity: 0.6; font-weight: 500;">0</span>
         </div>
-        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down" style="transition: transform 0.15s ease-in-out; font-size: 13px; opacity: 0.7;"></div>
+        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down ${isExpanded ? 'up' : 'down'}" style="transition: transform 0.15s ease-in-out; font-size: 13px; opacity: 0.7;"></div>
       </div>
-      <div class="cfgsync-drawer-content" style="display: none; padding: 5px 6px;">
+      <div class="cfgsync-drawer-content" style="display: ${isExpanded ? 'block' : 'none'}; padding: 5px 6px;">
         <div class="cfgsync-group-items"></div>
       </div>
     `;
@@ -731,6 +736,7 @@ export class CloudConfigPanel {
       e.stopPropagation();
       const isHidden = contentEl.style.display === 'none';
       contentEl.style.display = isHidden ? 'block' : 'none';
+      this.drawerState.set(ct, isHidden);
       if (isHidden) {
         iconEl.classList.remove('down');
         iconEl.classList.add('up');
