@@ -1,3 +1,5 @@
+import { buildItemList, TYPE_LABELS, bindingKey, itemKey, isOwnBinding } from '../listModel.js';
+import { ensureTheme, escapeHtml, notify, chooseDisable } from './dialog.js';
 import { SyncState, SyncMode, ReloadStrategy } from '../../common/constants.js';
 import { showConflictDialog } from './conflictDialog.js';
 import { showClaimDialog, showShareDialog } from './shareDialog.js';
@@ -37,6 +39,7 @@ export class CloudConfigPanel {
   }
 
   render(targetEl) {
+    ensureTheme();
     this.entryContainer = targetEl;
     this.renderEntryBar();
 
@@ -55,12 +58,15 @@ export class CloudConfigPanel {
 
         const dialog = document.createElement('div');
         dialog.id = 'cfgsync-modal-dialog';
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+        dialog.setAttribute('aria-label', '配置云同步');
         dialog.style.cssText = `
           width: 680px; max-width: 96vw; max-height: 88vh;
-          background: #161920; border: 1px solid rgba(255, 255, 255, 0.14);
+          background: var(--cfgsync-bg); border: 1px solid color-mix(in srgb, var(--cfgsync-text) 14%, transparent);
           border-radius: 8px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
           display: flex; flex-direction: column; overflow: hidden;
-          color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          color: var(--cfgsync-text); font-family: inherit;
           box-sizing: border-box;
         `;
 
@@ -94,16 +100,16 @@ export class CloudConfigPanel {
   renderEntryBar() {
     if (!this.entryContainer) return;
     this.entryContainer.innerHTML = `
-      <div class="cfgsync-entry-bar" style="background: #161920; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; box-sizing: border-box;">
+      <div class="cfgsync-entry-bar" style="background: var(--cfgsync-bg); border: 1px solid color-mix(in srgb, var(--cfgsync-text) 10%, transparent); border-radius: 6px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; box-sizing: border-box;">
         <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
-          <span style="font-size: 13px; font-weight: 600; color: #e6edf3; white-space: nowrap;">配置云同步</span>
-          <span style="font-size: 12px; color: #8b949e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">账号: <strong class="cfgsync-entry-account-label" style="color: #c9d1d9; font-weight: 500;">${this.accountHandle}</strong></span>
+          <span style="font-size: 13px; font-weight: 600; color: var(--cfgsync-text); white-space: nowrap;">配置云同步</span>
+          <span style="font-size: 12px; color: var(--cfgsync-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">账号: <strong class="cfgsync-entry-account-label" style="color: var(--cfgsync-text); font-weight: 500;">${escapeHtml(this.accountHandle)}</strong></span>
         </div>
         <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
-          <button id="cfgsync-open-modal-btn" type="button" style="height: 26px; padding: 0 11px; border-radius: 5px; font-size: 12px; font-weight: 600; color: #e6edf3; background: rgba(88,166,255,0.16); border: 1px solid rgba(88,166,255,0.42); cursor: pointer; white-space: nowrap !important; width: auto !important; min-width: unset !important; margin: 0;">
+          <button id="cfgsync-open-modal-btn" type="button" style="height: 26px; padding: 0 11px; border-radius: 5px; font-size: 12px; font-weight: 600; color: var(--cfgsync-text); background: rgba(88,166,255,0.16); border: 1px solid rgba(88,166,255,0.42); cursor: pointer; white-space: nowrap !important; width: auto !important; min-width: unset !important; margin: 0;">
             打开面板
           </button>
-          <button id="cfgsync-entry-backup-btn" type="button" style="height: 26px; padding: 0 10px; border-radius: 5px; font-size: 12px; font-weight: 500; color: #c9d1d9; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); cursor: pointer; white-space: nowrap !important; width: auto !important; min-width: unset !important; margin: 0;">
+          <button id="cfgsync-entry-backup-btn" type="button" style="height: 26px; padding: 0 10px; border-radius: 5px; font-size: 12px; font-weight: 500; color: var(--cfgsync-text); background: color-mix(in srgb, var(--cfgsync-text) 5%, transparent); border: 1px solid color-mix(in srgb, var(--cfgsync-text) 12%, transparent); cursor: pointer; white-space: nowrap !important; width: auto !important; min-width: unset !important; margin: 0;">
             <span class="cfgsync-entry-backup-text">一键备份</span>
           </button>
         </div>
@@ -137,12 +143,27 @@ export class CloudConfigPanel {
       this.modalBackdrop.style.display = 'flex';
     }
     this.refresh();
+    const close = event => {
+      if (document.querySelector('.cfgsync-modal-overlay:not(#cfgsync-main-modal-backdrop)')) return;
+      if (event.key === 'Escape') this.closeModal();
+      if (event.key === 'Tab') {
+        const controls = [...this.container.querySelectorAll('button,input,select,summary')].filter(el => !el.disabled && el.getClientRects().length);
+        const first = controls[0], last = controls.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+    };
+    if (typeof window === 'undefined') return;
+    this._modalKeydown = close; window.addEventListener('keydown', close);
+    this.container.querySelector('#cfgsync-search-input')?.focus();
   }
 
   closeModal() {
+    if (this._modalKeydown && typeof window !== 'undefined') window.removeEventListener('keydown', this._modalKeydown);
     if (this.modalBackdrop) {
       this.modalBackdrop.style.display = 'none';
     }
+    this.entryContainer?.querySelector?.('#cfgsync-open-modal-btn')?.focus();
   }
 
   /**
@@ -153,65 +174,58 @@ export class CloudConfigPanel {
       return;
     }
 
-    const neutralBtnStyle = 'display:inline-flex; align-items:center; justify-content:center; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:28px; padding:0 11px; margin:0; border-radius:5px; font-size:12px; font-weight:500; color:#c9d1d9; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.12); cursor:pointer; user-select:none;';
-    const primaryBtnStyle = 'display:inline-flex; align-items:center; justify-content:center; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:28px; padding:0 12px; margin:0; border-radius:5px; font-size:12px; font-weight:600; color:#e6edf3; background:rgba(88,166,255,0.16); border:1px solid rgba(88,166,255,0.42); cursor:pointer; user-select:none;';
+    const neutralBtnStyle = 'display:inline-flex; align-items:center; justify-content:center; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:28px; padding:0 11px; margin:0; border-radius:5px; font-size:12px; font-weight:500; color:var(--cfgsync-text); background:color-mix(in srgb, var(--cfgsync-text) 5%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 12%, transparent); cursor:pointer; user-select:none;';
+    const primaryBtnStyle = 'display:inline-flex; align-items:center; justify-content:center; white-space:nowrap !important; width:auto !important; min-width:unset !important; height:28px; padding:0 12px; margin:0; border-radius:5px; font-size:12px; font-weight:600; color:var(--cfgsync-text); background:rgba(88,166,255,0.16); border:1px solid rgba(88,166,255,0.42); cursor:pointer; user-select:none;';
 
     this.container.innerHTML = `
-      <div class="cfgsync-panel-container" style="display:flex; flex-direction:column; width:100%; height:100%; max-height:88vh; overflow:hidden; box-sizing:border-box;">
-        <!-- 第一行：标题与账号栏 -->
-        <div style="padding:12px 16px; border-bottom:1px solid rgba(255,255,255,0.07); background:rgba(255,255,255,0.02); display:flex; align-items:center; justify-content:space-between; flex-shrink:0;">
-          <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-            <span style="font-size:15px; font-weight:600; color:#f0f6fc; white-space:nowrap;">云端配置</span>
-            <span style="font-size:12px; color:#8b949e; padding:1px 8px; border-radius:4px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">账号: <strong class="cfgsync-account-label" style="color:#c9d1d9; font-weight:500;">${this.accountHandle}</strong></span>
-          </div>
-          <button id="cfgsync-modal-close-btn" type="button" title="关闭" style="width:28px !important; min-width:28px !important; height:28px !important; padding:0; margin:0; border-radius:5px; background:transparent; border:none; color:#8b949e; font-size:20px; line-height:1; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">&times;</button>
+      <div class="cfgsync-panel-container">
+        <header class="cfgsync-header">
+          <div class="cfgsync-brand-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a5 5 0 1 1 1.1-9.9A6 6 0 0 1 20 10a4 4 0 0 1-1 8"/><path d="M12 13v8m-3-5 3-3 3 3"/></svg></div>
+          <div class="cfgsync-heading"><h2>配置云同步</h2><p>保存每次调整，在设备之间安心接续</p></div>
+          <span class="cfgsync-account-pill" title="当前登录账号">@<strong class="cfgsync-account-label">${escapeHtml(this.accountHandle)}</strong></span>
+          <button id="cfgsync-modal-close-btn" type="button" aria-label="关闭面板" style="border:0;background:transparent;color:var(--cfgsync-muted);font-size:24px;width:32px;height:32px;">&times;</button>
+        </header>
+        <div class="cfgsync-toolbar">
+          <button id="cfgsync-backup-all-btn" class="cfgsync-primary" type="button"><i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i><span class="cfgsync-backup-all-text">一键备份</span></button>
+          <button id="cfgsync-claim-btn" type="button"><span>认领分享</span></button>
+          <button id="cfgsync-refresh-btn" type="button"><span class="cfgsync-refresh-text">刷新</span></button>
+          <div class="cfgsync-toolbar-spacer"></div>
+          <details class="cfgsync-overflow"><summary>更多工具 ▾</summary><div class="cfgsync-overflow-menu">
+            <button id="cfgsync-export-backup-btn" type="button"><span class="cfgsync-export-backup-text">导出灾备包</span></button>
+            <button id="cfgsync-import-backup-btn" type="button"><span class="cfgsync-import-backup-text">导入灾备包</span></button>
+            <button id="cfgsync-dashboard-btn" type="button">存储看板</button>
+            <button id="cfgsync-settings-btn" type="button">同步设置</button>
+          </div></details>
+          <input type="file" id="cfgsync-dr-file-input" accept=".zip,application/zip" hidden />
         </div>
-
-        <!-- 第二行：独立全局操作按钮栏 -->
-        <div style="padding:10px 16px; border-bottom:1px solid rgba(255,255,255,0.06); background:rgba(255,255,255,0.01); display:flex; align-items:center; gap:6px; flex-wrap:wrap; flex-shrink:0;">
-          <button id="cfgsync-backup-all-btn" type="button" title="一键备份所有已开启同步的本地配置到云端" style="${primaryBtnStyle}">
-            <span class="cfgsync-backup-all-text">一键备份</span>
-          </button>
-          <button id="cfgsync-claim-btn" type="button" title="认领好友分享给你的配置邀请码" style="${neutralBtnStyle}">
-            <span>认领</span>
-          </button>
-          <button id="cfgsync-refresh-btn" type="button" title="刷新配置状态" style="${neutralBtnStyle}">
-            <span class="cfgsync-refresh-text">刷新</span>
-          </button>
-          <button id="cfgsync-export-backup-btn" type="button" title="导出全量配置与资产灾备归档包 (.zip)" style="${neutralBtnStyle}">
-            <span class="cfgsync-export-backup-text">灾备导出</span>
-          </button>
-          <button id="cfgsync-import-backup-btn" type="button" title="导入灾备归档包 (.zip，零静默覆盖)" style="${neutralBtnStyle}">
-            <span class="cfgsync-import-backup-text">灾备导入</span>
-          </button>
-          <input type="file" id="cfgsync-dr-file-input" accept=".zip,application/zip,application/x-zip-compressed" style="display:none;" />
-          <button id="cfgsync-dashboard-btn" type="button" title="存储看板与清理工具" style="${neutralBtnStyle}">
-            <span>看板</span>
-          </button>
-          <button id="cfgsync-settings-btn" type="button" title="云同步设置" style="${neutralBtnStyle}">
-            <span>设置</span>
-          </button>
+        <div class="cfgsync-summary" aria-live="polite">
+          <span><strong id="cfgsync-total-count">—</strong>项配置</span>
+          <span><strong id="cfgsync-enabled-count">—</strong>项已开启</span>
+          <span><strong id="cfgsync-cloud-count">—</strong>项有快照</span>
+          <span class="cfgsync-sync-health" id="cfgsync-sync-health">自动备份未开启</span>
         </div>
-
-        <!-- 第三行：分类标签栏与搜索框 -->
-        <div class="cfgsync-filter-bar" style="padding:10px 16px; border-bottom:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; gap:8px; flex-shrink:0;">
-          <div id="cfgsync-category-tabs" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;"></div>
-          <div>
-            <input id="cfgsync-search-input" type="text" placeholder="搜索当前分类下的配置名称或文件名..." style="width:100%; box-sizing:border-box; height:30px; font-size:12px; padding:0 10px; border-radius:5px; background:rgba(0,0,0,0.28); border:1px solid rgba(255,255,255,0.1); color:#e6edf3; outline:none;" />
-            <select id="cfgsync-category-filter" style="display:none;">
-              <option value="">全部分类</option>
-            </select>
+        <div class="cfgsync-filter-bar">
+          <div id="cfgsync-category-tabs" role="tablist" aria-label="配置分类"></div>
+          <div class="cfgsync-search-row">
+            <input id="cfgsync-search-input" type="search" aria-label="搜索配置" placeholder="搜索配置名称、文件名或分享账号…" />
+            <label class="cfgsync-extra-types"><input id="cfgsync-extra-types" type="checkbox" />显示空分类</label>
+            <select id="cfgsync-category-filter" hidden><option value="">全部分类</option></select>
           </div>
         </div>
-
-        <!-- 第四部分：主体滚动列表区 -->
-        <div style="padding:12px 16px; overflow-y:auto; flex:1; min-height:220px;">
-          <div id="cfgsync-items-loading" style="text-align:center; padding:24px 16px; font-size:12px; color:#8b949e;">正在加载配置...</div>
+        <div class="cfgsync-list-scroll">
+          <div id="cfgsync-items-loading" role="status" style="text-align:center;padding:32px;color:var(--cfgsync-muted);">正在读取配置…</div>
           <div id="cfgsync-items-tree"></div>
+          <div id="cfgsync-no-results" hidden style="text-align:center;padding:32px;color:var(--cfgsync-muted);font-size:12px;">没有匹配的配置，试试其他关键词。</div>
         </div>
+        <footer class="cfgsync-footer"><span id="cfgsync-refresh-status" role="status">准备就绪</span><span id="cfgsync-storage-status">快照保存在当前酒馆服务器</span></footer>
       </div>
     `;
-
+    this.container.querySelector('#cfgsync-extra-types').onchange = event => {
+      this.showEmptyTypes = event.target.checked; this.refresh();
+    };
+    this.container.querySelectorAll('.cfgsync-overflow-menu button').forEach(button => {
+      button.addEventListener('click', () => this.container.querySelector('.cfgsync-overflow').removeAttribute('open'));
+    });
     const closeBtn = this.container.querySelector('#cfgsync-modal-close-btn');
     if (closeBtn) {
       closeBtn.onmousedown = (e) => e.stopPropagation();
@@ -245,14 +259,16 @@ export class CloudConfigPanel {
     if (tabsEl) {
       tabsEl.querySelectorAll('.cfgsync-cat-tab-btn').forEach((btn) => {
         const isActive = btn.dataset.tabType === contentType;
+        btn.setAttribute('aria-selected', String(isActive));
+        btn.setAttribute('role', 'tab');
         btn.style.fontWeight = isActive ? '600' : '400';
-        btn.style.color = isActive ? '#f0f6fc' : '#8b949e';
-        btn.style.background = isActive ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.02)';
-        btn.style.borderColor = isActive ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.07)';
+        btn.style.color = isActive ? 'var(--cfgsync-text)' : 'var(--cfgsync-muted)';
+        btn.style.background = isActive ? 'color-mix(in srgb, var(--cfgsync-text) 10%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 2%, transparent)';
+        btn.style.borderColor = isActive ? 'color-mix(in srgb, var(--cfgsync-text) 24%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 7%, transparent)';
         const badge = btn.querySelector('.cfgsync-tab-badge');
         if (badge) {
-          badge.style.background = isActive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)';
-          badge.style.color = isActive ? '#e6edf3' : '#8b949e';
+          badge.style.background = isActive ? 'color-mix(in srgb, var(--cfgsync-text) 15%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 5%, transparent)';
+          badge.style.color = isActive ? 'var(--cfgsync-text)' : 'var(--cfgsync-muted)';
         }
       });
     }
@@ -268,6 +284,7 @@ export class CloudConfigPanel {
         }
       });
     }
+    this.container.querySelector('#cfgsync-search-input')?.dispatchEvent(new Event('input'));
   }
 
   bindSearchFilter() {
@@ -282,6 +299,7 @@ export class CloudConfigPanel {
       if (!treeEl) return;
 
       const drawers = treeEl.querySelectorAll('.cfgsync-group-drawer');
+      let matches = 0;
       drawers.forEach(drawer => {
         const ct = drawer.dataset.contentType;
         if (selectedCat && ct !== selectedCat) {
@@ -300,11 +318,14 @@ export class CloudConfigPanel {
         });
 
         drawer.style.display = 'block';
+        matches += visibleCount;
         const content = drawer.querySelector('.cfgsync-drawer-content');
         if (content) {
           content.style.display = 'block';
         }
       });
+      const empty = this.container.querySelector('#cfgsync-no-results');
+      if (empty) empty.hidden = !q || matches > 0;
     };
 
     if (!searchInput.dataset.bound) {
@@ -361,10 +382,10 @@ export class CloudConfigPanel {
           if (typeof toastr !== 'undefined' && toastr.success) {
             toastr.success(`灾备归档「${fileName}」导出成功`, '云配置');
           } else {
-            alert(`【灾备包导出成功】\n\n已下载文件: ${fileName}\n体积: ${(blob.size / 1024).toFixed(1)} KB`);
+            notify(`【灾备包导出成功】\n\n已下载文件: ${fileName}\n体积: ${(blob.size / 1024).toFixed(1)} KB`);
           }
         } catch (err) {
-          alert(`导出灾备包失败: ${err.message}`);
+          notify(`导出灾备包失败: ${escapeHtml(err.message)}`);
         } finally {
           exportBtn.disabled = false;
           if (textSpan) textSpan.textContent = '灾备导出';
@@ -399,10 +420,10 @@ export class CloudConfigPanel {
         try {
           const res = await this.api.importBackup(file);
           const receipt = `【灾备安全导入完成】\n\n• 新增/同步配置项: ${res.importedRecords || 0} 个\n• 导入历史快照版本: ${res.importedVersions || 0} 个\n• 冲突项安全保留为新版本: ${res.conflictCount || 0} 个\n\n全部数据已安全落盘并可追溯回滚。`;
-          alert(receipt);
+          notify(receipt);
           await this.refresh();
         } catch (err) {
-          alert(`导入灾备包失败: ${err.message}`);
+          notify(`导入灾备包失败: ${escapeHtml(err.message)}`);
         } finally {
           fileInput.value = '';
           importBtn.disabled = false;
@@ -540,10 +561,10 @@ export class CloudConfigPanel {
     const entryTextSpan = entryBackupBtn?.querySelector?.('.cfgsync-entry-backup-text');
 
     const bindings = await this.storage.getBindingsByAccount(this.accountHandle);
-    const enabledBindings = (bindings || []).filter(b => b.enabled);
+    const enabledBindings = (bindings || []).filter(b => b.enabled && isOwnBinding(b, this.accountHandle));
 
     if (enabledBindings.length === 0) {
-      alert('当前没有已开启云同步的配置项。\n请先勾选需要同步的项目复选框，再执行一键备份。');
+      notify('当前没有已开启云同步的配置项。\n请先勾选需要同步的项目复选框，再执行一键备份。');
       return { total: 0, successCount: 0, failCount: 0 };
     }
 
@@ -578,7 +599,7 @@ export class CloudConfigPanel {
           }
 
           const res = await this.syncManager.pushLocal(binding, localPayload, {
-            force: true,
+            force: false,
             versionTitle: `一键批量备份 (${new Date().toLocaleTimeString()})`,
           });
 
@@ -588,7 +609,7 @@ export class CloudConfigPanel {
               totalBytes += Number(res.size_bytes);
             }
           } else {
-            failures.push({ name: binding.display_name, error: res.error || '上传未成功' });
+            failures.push({ name: binding.display_name, error: res.conflict ? '云端已有更新，请先处理冲突' : res.error || '上传未成功' });
           }
         } catch (err) {
           console.error(`[cfgsync] 一键备份项【${binding.display_name}】失败:`, err);
@@ -603,7 +624,7 @@ export class CloudConfigPanel {
       if (failures.length > 0) {
         summaryMsg += `\n\n失败详情:\n` + failures.map(f => `• ${f.name}: ${f.error}`).join('\n');
       }
-      alert(summaryMsg);
+      notify(summaryMsg);
 
       return { total: enabledBindings.length, successCount, failCount: failures.length, totalBytes, failures };
     } finally {
@@ -657,23 +678,9 @@ export class CloudConfigPanel {
 
       const allActiveTypes = typeRes.activeTypes || (typeRes.groups?.P0 || ['settings', 'openai_preset', 'world']);
       const bindings = await this.storage.getBindingsByAccount(this.accountHandle);
-      const bindingMap = new Map(bindings.map(b => [`${b.content_type}:${b.item_uid}`, b]));
+    const bindingMap = new Map(bindings.map(b => [bindingKey(b.source_owner_handle || this.accountHandle, b.content_type, b.item_uid), b]));
 
-      const ctNameMap = {
-        'world': '世界设定 / 规则书',
-        'openai_preset': '对话补全预设',
-        'character': '角色卡',
-        'settings': '通用设置',
-        'persona': '用户人设',
-        'avatar': '人设头像',
-        'chat': '会话记录',
-        'group': '群组设定',
-        'group_chat': '群聊记录',
-        'theme': '主题风格',
-        'background': '聊天背景',
-        'sprites': '表情贴图包',
-        'quick_replies': '快捷回复',
-      };
+      const ctNameMap = TYPE_LABELS;
 
       const preferredOrder = [
         'world',
@@ -691,25 +698,10 @@ export class CloudConfigPanel {
         'quick_replies',
       ];
 
-      const UNWANTED_PRESET_TYPES = new Set([
-        'textgen_preset',
-        'novel_preset',
-        'kobold_preset',
-        'instruct',
-        'context',
-        'sysprompt',
-      ]);
-      const activeTypesToLoad = allActiveTypes
-        .filter(ct => !UNWANTED_PRESET_TYPES.has(ct))
-        .sort((a, b) => {
-          const idxA = preferredOrder.indexOf(a);
-          const idxB = preferredOrder.indexOf(b);
-          return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
-        });
-
-      UNWANTED_PRESET_TYPES.forEach(unwantedCt => {
-        const strayDrawer = treeEl.querySelector(`.cfgsync-group-drawer[data-content-type="${unwantedCt}"]`);
-        if (strayDrawer) strayDrawer.remove();
+      const activeTypesToLoad = [...allActiveTypes].sort((a, b) => {
+        const idxA = preferredOrder.indexOf(a);
+        const idxB = preferredOrder.indexOf(b);
+        return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
       });
 
       const catSelect = this.container.querySelector('#cfgsync-category-filter');
@@ -724,7 +716,7 @@ export class CloudConfigPanel {
 
       const typeDataList = await Promise.all(activeTypesToLoad.map(async (ct) => {
         const [localRes, cloudRes] = await Promise.all([
-          this.api.getItems(ct, this.accountHandle, 'local').catch(() => ({ items: [] })),
+          this.api.getItems(ct, this.accountHandle, 'local'),
           this.api.getItems(ct, '', 'cloud', true).catch(() => ({ items: [] })),
         ]);
         return {
@@ -738,47 +730,13 @@ export class CloudConfigPanel {
 
       for (const { ct, localItems, cloudItems } of typeDataList) {
         const isCoreType = ct === 'settings' || ct === 'openai_preset' || ct === 'world';
-        if (!isCoreType && localItems.length === 0 && cloudItems.length === 0) {
+        if (!this.showEmptyTypes && !isCoreType && localItems.length === 0 && cloudItems.length === 0) {
           const oldDrawer = treeEl.querySelector(`.cfgsync-group-drawer[data-content-type="${ct}"]`);
           if (oldDrawer) oldDrawer.remove();
           continue;
         }
 
-        const itemMap = new Map();
-        for (const loc of localItems) {
-          itemMap.set(loc.itemUid, {
-            itemUid: loc.itemUid,
-            displayName: loc.displayName,
-            sourceRef: loc.sourceRef,
-            existsLocally: true,
-            cloudItem: null,
-          });
-        }
-
-        for (const cld of cloudItems) {
-          if (itemMap.has(cld.item_uid)) {
-            const existing = itemMap.get(cld.item_uid);
-            existing.cloudItem = cld;
-          } else {
-            itemMap.set(cld.item_uid, {
-              itemUid: cld.item_uid,
-              displayName: cld.display_name,
-              sourceRef: `来自云端 (${cld.owner_handle})`,
-              existsLocally: false,
-              cloudItem: cld,
-            });
-          }
-        }
-
-        const items = Array.from(itemMap.values());
-        items.sort((a, b) => {
-          const aHasCloud = Boolean(a.cloudItem);
-          const bHasCloud = Boolean(b.cloudItem);
-          if (aHasCloud !== bHasCloud) {
-            return aHasCloud ? -1 : 1;
-          }
-          return (a.displayName || '').localeCompare(b.displayName || '', 'zh-CN');
-        });
+        const items = buildItemList(localItems, cloudItems, this.accountHandle);
         const displayTypeName = ctNameMap[ct] || ct;
         const cloudCount = items.filter(i => Boolean(i.cloudItem && !i.cloudItem.is_deleted)).length;
         const totalCount = items.length;
@@ -808,7 +766,13 @@ export class CloudConfigPanel {
       }
 
       if (loadingEl) loadingEl.style.display = 'none';
+      this.updateSummary();
+      this.container.querySelector('#cfgsync-search-input')?.dispatchEvent(new Event('input'));
+      const status = this.container.querySelector('#cfgsync-refresh-status');
+      if (status) { status.textContent = '已更新 · ' + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); status.dataset.health = 'success'; }
     } catch (err) {
+      const status = this.container.querySelector('#cfgsync-refresh-status');
+      if (status) { status.textContent = '刷新失败：' + err.message; status.dataset.health = 'error'; }
       if (loadingEl) loadingEl.style.display = 'none';
       if (err.status === 404 || err.message?.includes('404')) {
         this.renderServerErrorNotice();
@@ -839,16 +803,16 @@ export class CloudConfigPanel {
       btn.style.cssText = `
         height: 28px; padding: 0 10px; margin: 0; border-radius: 5px; font-size: 12px;
         font-weight: ${isActive ? '600' : '400'};
-        color: ${isActive ? '#f0f6fc' : '#8b949e'};
-        background: ${isActive ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.02)'};
-        border: 1px solid ${isActive ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.07)'};
+        color: ${isActive ? 'var(--cfgsync-text)' : 'var(--cfgsync-muted)'};
+        background: ${isActive ? 'color-mix(in srgb, var(--cfgsync-text) 10%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 2%, transparent)'};
+        border: 1px solid ${isActive ? 'color-mix(in srgb, var(--cfgsync-text) 24%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 7%, transparent)'};
         display: inline-flex; align-items: center; gap: 6px; white-space: nowrap !important;
         width: auto !important; min-width: unset !important; cursor: pointer; user-select: none;
         transition: all 0.15s ease;
       `;
       btn.innerHTML = `
         <span>${displayTypeName}</span>
-        <span class="cfgsync-tab-badge" style="font-size:12px; padding:0 5px; border-radius:6px; background:${isActive ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)'}; color:${isActive ? '#e6edf3' : '#8b949e'};">${badgeText}</span>
+        <span class="cfgsync-tab-badge" style="font-size:12px; padding:0 5px; border-radius:6px; background:${isActive ? 'color-mix(in srgb, var(--cfgsync-text) 15%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 5%, transparent)'}; color:${isActive ? 'var(--cfgsync-text)' : 'var(--cfgsync-muted)'};">${badgeText}</span>
       `;
       btn.onmousedown = (e) => e.stopPropagation();
       btn.onclick = (e) => {
@@ -869,7 +833,7 @@ export class CloudConfigPanel {
     let hasMissingItem = false;
     for (const evt of events) {
       const row = this.container.querySelector(
-        `.cfgsync-item-row[data-content-type="${evt.content_type}"][data-item-uid="${evt.item_uid}"]`
+        `.cfgsync-item-row[data-content-type="${evt.content_type}"][data-item-uid="${evt.item_uid}"][data-source-owner="${CSS.escape(evt.owner_handle || this.accountHandle)}"]`
       );
       if (row) {
         const sourceOwner = evt.owner_handle || this.accountHandle;
@@ -931,7 +895,7 @@ export class CloudConfigPanel {
     if (!itemsContainer) return;
 
     if (items.length === 0) {
-      itemsContainer.innerHTML = `<div class="cfgsync-empty-notice" style="font-size:12px; color:#8b949e; padding: 16px 4px; text-align:center;">暂无可用配置</div>`;
+      itemsContainer.innerHTML = `<div class="cfgsync-empty-notice" style="font-size:12px; color:var(--cfgsync-muted); padding: 16px 4px; text-align:center;">暂无可用配置</div>`;
       return;
     }
 
@@ -940,10 +904,10 @@ export class CloudConfigPanel {
       emptyNotice.remove();
     }
 
-    const currentItemUids = new Set(items.map(i => i.itemUid));
+    const currentItemUids = new Set(items.map(i => itemKey(i.sourceOwner || this.accountHandle, i.itemUid)));
 
     itemsContainer.querySelectorAll('.cfgsync-item-row').forEach(row => {
-      if (!currentItemUids.has(row.dataset.itemUid)) {
+      if (!currentItemUids.has(itemKey(row.dataset.sourceOwner || this.accountHandle, row.dataset.itemUid))) {
         row.remove();
       }
     });
@@ -955,27 +919,27 @@ export class CloudConfigPanel {
     let dividerInserted = false;
 
     for (const item of items) {
-      const binding = bindingMap.get(`${ct}:${item.itemUid}`);
+      const binding = bindingMap.get(bindingKey(item.sourceOwner || this.accountHandle, ct, item.itemUid));
       const isUnsynced = !item.cloudItem || item.cloudItem.is_deleted;
 
       if (hasBoth && isUnsynced && !dividerInserted) {
         const divider = document.createElement('div');
         divider.className = 'cfgsync-section-divider';
         divider.style.cssText = `
-          font-size: 12px; color: #8b949e; margin: 10px 2px 4px 2px;
-          padding-top: 8px; border-top: 1px dashed rgba(255, 255, 255, 0.1);
+          font-size: 12px; color: var(--cfgsync-muted); margin: 10px 2px 4px 2px;
+          padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--cfgsync-text) 10%, transparent);
           display: flex; align-items: center; justify-content: space-between;
           user-select: none;
         `;
         divider.innerHTML = `
           <span>本地未同步 (${totalCount - cloudCount})</span>
-          <span style="opacity:0.6;">点击推送直接备份到云端</span>
+          <span style="opacity:0.6;">点击备份保存到云端</span>
         `;
         itemsContainer.appendChild(divider);
         dividerInserted = true;
       }
 
-      let existingRow = itemsContainer.querySelector(`.cfgsync-item-row[data-item-uid="${item.itemUid}"]`);
+      let existingRow = itemsContainer.querySelector(`.cfgsync-item-row[data-item-uid="${item.itemUid}"][data-source-owner="${CSS.escape(item.sourceOwner || this.accountHandle)}"]`);
       if (existingRow) {
         this.updateRowState(existingRow, binding, item.cloudItem, item.existsLocally);
         itemsContainer.appendChild(existingRow);
@@ -989,6 +953,16 @@ export class CloudConfigPanel {
   /**
    * 原地无感更新指定分类抽屉与顶部标签的计数角标
    */
+  updateSummary() {
+    if (!this.container) return;
+    const rows = [...this.container.querySelectorAll('.cfgsync-item-row')];
+    for (const [id, count] of [['total', rows.length], ['enabled', rows.filter(r => r._binding?.enabled).length], ['cloud', rows.filter(r => r._cloudItem && !r._cloudItem.is_deleted).length]]) {
+      const target = this.container.querySelector('#cfgsync-' + id + '-count'); if (target) target.textContent = count;
+    }
+    const health = this.container.querySelector('#cfgsync-sync-health');
+    if (health) health.textContent = this.autoSyncEngine?.enabled ? '后台自动备份已开启' : '自动备份未开启';
+  }
+
   updateDrawerCount(contentType) {
     const groupDrawer = this.container?.querySelector(`.cfgsync-group-drawer[data-content-type="${contentType}"]`);
     if (!groupDrawer) return;
@@ -1015,23 +989,23 @@ export class CloudConfigPanel {
   getStateInfo(state, version, cloudItem = null, binding = null) {
     if (binding && binding.enabled && state === SyncState.SYNCED) {
       if (cloudItem && cloudItem.current_version > (binding.last_synced_version || 0)) {
-        return { color: '#e3b341', label: '有更新' };
+        return { color: 'var(--cfgsync-warning)', label: '有更新' };
       }
       const fromText = (binding.source_owner_handle && binding.source_owner_handle !== this.accountHandle) ? ` @${binding.source_owner_handle}` : '';
-      return { color: '#c9d1d9', label: `已同步${fromText}` };
+      return { color: 'var(--cfgsync-text)', label: `已同步${fromText}` };
     }
     if (state === SyncState.CONFLICT) {
-      return { color: '#f85149', label: '冲突' };
+      return { color: 'var(--cfgsync-danger)', label: '冲突' };
     }
     if (state === SyncState.BACKUP_CREATED) {
-      return { color: '#c9d1d9', label: '冷备份' };
+      return { color: 'var(--cfgsync-text)', label: '冷备份' };
     }
     if (cloudItem) {
       const isCross = cloudItem.owner_handle && cloudItem.owner_handle !== this.accountHandle;
       const ownerText = isCross ? ` @${cloudItem.owner_handle}` : '';
-      return { color: '#c9d1d9', label: `已备份${ownerText}` };
+      return { color: 'var(--cfgsync-text)', label: `已备份${ownerText}` };
     }
-    return { color: '#8b949e', label: '未同步' };
+    return { color: 'var(--cfgsync-muted)', label: '未同步' };
   }
 
   /**
@@ -1060,7 +1034,7 @@ export class CloudConfigPanel {
    */
   renderVersionSelectorHtml(state, version, cloudItem = null, binding = null, existsLocally = true) {
     if (!cloudItem) {
-      return `<span class="cfgsync-state-badge cfgsync-badge-unsynced" title="当前配置仅保存在本地，尚未备份到云端" style="display:inline-flex; align-items:center; justify-content:center; font-size:12px; height:23px; line-height:21px; box-sizing:border-box; padding:0 8px; border-radius:4px; background:transparent; border:1px dashed rgba(255,255,255,0.14); color:#8b949e; white-space:nowrap; user-select:none; flex-shrink:0;">未同步</span>`;
+      return `<span class="cfgsync-state-badge cfgsync-badge-unsynced" title="当前配置仅保存在本地，尚未备份到云端" style="display:inline-flex; align-items:center; justify-content:center; font-size:12px; height:23px; line-height:21px; box-sizing:border-box; padding:0 8px; border-radius:4px; background:transparent; border:1px dashed color-mix(in srgb, var(--cfgsync-text) 14%, transparent); color:var(--cfgsync-muted); white-space:nowrap; user-select:none; flex-shrink:0;">未同步</span>`;
     }
 
     const isCross = cloudItem.owner_handle && cloudItem.owner_handle !== this.accountHandle;
@@ -1068,11 +1042,11 @@ export class CloudConfigPanel {
       ? '冲突 ▾'
       : (isCross ? `@${cloudItem.owner_handle} ▾` : '历史快照 ▾');
 
-    let btnColorStyle = 'border:1px solid rgba(255,255,255,0.14) !important; background:rgba(255,255,255,0.06) !important; color:#c9d1d9 !important;';
+    let btnColorStyle = 'border:1px solid color-mix(in srgb, var(--cfgsync-text) 14%, transparent) !important; background:color-mix(in srgb, var(--cfgsync-text) 6%, transparent) !important; color:var(--cfgsync-text) !important;';
     if (state === SyncState.CONFLICT) {
-      btnColorStyle = 'border:1px solid rgba(248,81,73,0.45) !important; background:rgba(248,81,73,0.15) !important; color:#ff7b72 !important; font-weight:600 !important;';
+      btnColorStyle = 'border:1px solid rgba(248,81,73,0.45) !important; background:rgba(248,81,73,0.15) !important; color:var(--cfgsync-danger) !important; font-weight:600 !important;';
     } else if (!existsLocally || (binding?.enabled && cloudItem.current_version > (binding.last_synced_version || 0))) {
-      btnColorStyle = 'border:1px solid rgba(210,153,34,0.4) !important; background:rgba(210,153,34,0.12) !important; color:#e3b341 !important;';
+      btnColorStyle = 'border:1px solid rgba(210,153,34,0.4) !important; background:rgba(210,153,34,0.12) !important; color:var(--cfgsync-warning) !important;';
     }
 
     return `<button class="cfgsync-history-badge-btn menu_button" type="button" title="点击查看与管理云端历史快照" style="display:inline-flex !important; align-items:center !important; justify-content:center !important; font-size:12px !important; height:23px !important; line-height:21px !important; box-sizing:border-box !important; padding:0 9px !important; margin:0 !important; width:auto !important; min-width:unset !important; border-radius:4px !important; ${btnColorStyle} cursor:pointer !important; outline:none !important; white-space:nowrap !important; flex-shrink:0 !important; transition:all 0.15s ease !important;">
@@ -1134,9 +1108,9 @@ export class CloudConfigPanel {
       await this.handleReloadStrategy(strategy, item, versionDesc, this.accountHandle, res);
     } catch (e) {
       if (e.status === 423 || e.data?.code === 'LOCKED') {
-        alert('【拉取已被防替换锁定保护拦截】\n\n当前配置已开启防替换锁定保护，阻止来自云端的覆盖！\n如需覆盖更新本地，请先解除锁定，然后再执行拉取。');
+        notify('【拉取已被防替换锁定保护拦截】\n\n当前配置已开启防替换锁定保护，阻止来自云端的覆盖！\n如需覆盖更新本地，请先解除锁定，然后再执行拉取。');
       } else {
-        alert(`拉取失败: ${e.message}`);
+        notify(`拉取失败: ${e.message}`);
       }
     } finally {
       if (pullBtn) {
@@ -1261,6 +1235,8 @@ export class CloudConfigPanel {
     if (cloudItem !== undefined) row._cloudItem = cloudItem;
     row._existsLocally = existsLocally;
     const cItem = row._cloudItem || null;
+    row.dataset.state = binding?.state || (cItem ? "CLOUD_AVAILABLE" : "DISABLED");
+    row.dataset.shared = String(Boolean(cItem && cItem.owner_handle !== this.accountHandle));
     const hasCloud = Boolean(cItem && !cItem.is_deleted);
 
     const isEnabled = Boolean(binding?.enabled);
@@ -1268,24 +1244,24 @@ export class CloudConfigPanel {
     const version = binding?.last_synced_version || cItem?.current_version;
 
     // 1. 仅对异常或待处理状态凸显左边框颜色，其余保持克制中性色
-    let leftBorderColor = hasCloud ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.12)';
+    let leftBorderColor = hasCloud ? 'color-mix(in srgb, var(--cfgsync-text) 32%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 12%, transparent)';
     if (state === SyncState.CONFLICT) {
-      leftBorderColor = '#f85149';
+      leftBorderColor = 'var(--cfgsync-danger)';
     } else if (hasCloud && !existsLocally) {
-      leftBorderColor = '#d29922';
+      leftBorderColor = 'var(--cfgsync-warning)';
     }
 
     if (hasCloud) {
-      row._defaultBg = 'rgba(255, 255, 255, 0.035)';
-      row._hoverBg = 'rgba(255, 255, 255, 0.06)';
+      row._defaultBg = 'color-mix(in srgb, var(--cfgsync-text) 4%, transparent)';
+      row._hoverBg = 'color-mix(in srgb, var(--cfgsync-text) 6%, transparent)';
       row.style.background = row._defaultBg;
-      row.style.border = '1px solid rgba(255, 255, 255, 0.08)';
+      row.style.border = '1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent)';
       row.style.borderLeft = `3px solid ${leftBorderColor}`;
     } else {
-      row._defaultBg = 'rgba(255, 255, 255, 0.015)';
-      row._hoverBg = 'rgba(255, 255, 255, 0.035)';
+      row._defaultBg = 'color-mix(in srgb, var(--cfgsync-text) 2%, transparent)';
+      row._hoverBg = 'color-mix(in srgb, var(--cfgsync-text) 4%, transparent)';
       row.style.background = row._defaultBg;
-      row.style.border = '1px dashed rgba(255, 255, 255, 0.1)';
+      row.style.border = '1px dashed color-mix(in srgb, var(--cfgsync-text) 10%, transparent)';
       row.style.borderLeft = `3px solid ${leftBorderColor}`;
     }
 
@@ -1293,23 +1269,26 @@ export class CloudConfigPanel {
     const rowName = row.querySelector('.cfgsync-row-name');
     if (rowName) {
       rowName.style.fontWeight = hasCloud ? '600' : '400';
-      rowName.style.color = hasCloud ? '#f0f6fc' : '#c9d1d9';
+      rowName.style.color = hasCloud ? 'var(--cfgsync-text)' : 'var(--cfgsync-text)';
     }
     const rowRef = row.querySelector('.cfgsync-row-ref');
     if (rowRef) {
       if (state === SyncState.CONFLICT) {
         const baseRef = rowRef.dataset.sourceRef || rowRef.title || '';
         rowRef.textContent = `${baseRef} · 云端版本冲突`;
-        rowRef.style.color = '#f85149';
+        rowRef.style.color = 'var(--cfgsync-danger)';
+      } else if (row.dataset.shared === 'true') {
+        rowRef.textContent = `共享自 @${cItem.owner_handle} · 只读订阅${existsLocally ? '' : ' · 本地未下载'}`;
+        rowRef.style.color = 'var(--cfgsync-muted)';
       } else if (existsLocally) {
         const baseRef = rowRef.dataset.sourceRef || rowRef.title || '';
         const cleanRef = baseRef.startsWith('来自云端') ? (row._itemDisplayName ? `${row._itemDisplayName}.json` : baseRef) : baseRef;
         rowRef.textContent = `${cleanRef}${!hasCloud ? ' · 仅本地' : ''}`;
-        rowRef.style.color = hasCloud ? '#8b949e' : 'rgba(255,255,255,0.35)';
+        rowRef.style.color = hasCloud ? 'var(--cfgsync-muted)' : 'color-mix(in srgb, var(--cfgsync-text) 35%, transparent)';
       } else {
         const owner = cItem?.owner_handle || '云端';
         rowRef.textContent = `来自云端 (@${owner}) · 本地未下载`;
-        rowRef.style.color = '#e3b341';
+        rowRef.style.color = 'var(--cfgsync-warning)';
       }
     }
 
@@ -1362,26 +1341,26 @@ export class CloudConfigPanel {
 
     const pushBtn = row.querySelector('.cfgsync-push-btn');
     if (pushBtn) {
-      pushBtn.disabled = !existsLocally;
-      if (!existsLocally) {
+      pushBtn.disabled = !existsLocally || row.dataset.shared === 'true';
+      if (!existsLocally || row.dataset.shared === 'true') {
         pushBtn.style.opacity = '0.25';
         pushBtn.style.pointerEvents = 'none';
-        pushBtn.title = '本地不存在此文件 (请先点击左侧拉取)';
+        pushBtn.title = row.dataset.shared === 'true' ? '共享配置为只读，请拉取所有者的更新' : '本地不存在此文件，请先拉取';
       } else {
         pushBtn.style.opacity = '1';
         pushBtn.style.pointerEvents = 'auto';
-        pushBtn.title = hasCloud ? '推送到云端 (上传新快照覆盖云端)' : '未同步：立即推送到云端生成首个快照';
+        pushBtn.title = hasCloud ? '备份到云端，保存新的快照' : '备份此预设或配置到云端，生成首个快照';
       }
     }
 
     const shareBtn = row.querySelector('.cfgsync-share-btn');
     if (shareBtn) {
-      shareBtn.disabled = !hasCloud;
-      if (!hasCloud) {
+      shareBtn.disabled = !hasCloud || row.dataset.shared === 'true';
+      if (!hasCloud || row.dataset.shared === 'true') {
         shareBtn.style.opacity = '0.25';
         shareBtn.style.pointerEvents = 'none';
         shareBtn.style.cursor = 'not-allowed';
-        shareBtn.title = '尚未推送到云端，无法分享';
+        shareBtn.title = row.dataset.shared === 'true' ? '只有所有者可以分享此配置' : '尚未推送到云端，无法分享';
       } else {
         shareBtn.style.opacity = '1';
         shareBtn.style.pointerEvents = 'auto';
@@ -1390,6 +1369,9 @@ export class CloudConfigPanel {
       }
     }
 
+    const deleteBtn = row.querySelector('.cfgsync-delete-btn');
+    if (deleteBtn) deleteBtn.style.setProperty('display', row.dataset.shared === 'true' ? 'none' : 'inline-flex', 'important');
+    this.updateSummary();
     const toggle = row.querySelector('.cfgsync-toggle');
     if (toggle && toggle.checked !== isEnabled) {
       toggle.checked = isEnabled;
@@ -1401,6 +1383,7 @@ export class CloudConfigPanel {
     row.className = 'cfgsync-item-row';
     row.dataset.itemUid = item.itemUid;
     row.dataset.contentType = contentType;
+    row.dataset.sourceOwner = item.sourceOwner || item.cloudItem?.owner_handle || this.accountHandle;
     row.dataset.displayName = item.displayName || '';
 
     const cItem = item.cloudItem || null;
@@ -1417,24 +1400,24 @@ export class CloudConfigPanel {
     const isLocked = Boolean(cItem?.is_locked !== undefined ? cItem.is_locked : item.is_locked);
     row._isLocked = isLocked;
 
-    let leftBorderColor = hasCloud ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.12)';
-    let subTextColor = hasCloud ? '#8b949e' : 'rgba(255, 255, 255, 0.35)';
+    let leftBorderColor = hasCloud ? 'color-mix(in srgb, var(--cfgsync-text) 32%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 12%, transparent)';
+    let subTextColor = hasCloud ? 'var(--cfgsync-muted)' : 'color-mix(in srgb, var(--cfgsync-text) 35%, transparent)';
     if (state === SyncState.CONFLICT) {
-      leftBorderColor = '#f85149';
-      subTextColor = '#f85149';
+      leftBorderColor = 'var(--cfgsync-danger)';
+      subTextColor = 'var(--cfgsync-danger)';
     } else if (hasCloud && !row._existsLocally) {
-      leftBorderColor = '#d29922';
-      subTextColor = '#e3b341';
+      leftBorderColor = 'var(--cfgsync-warning)';
+      subTextColor = 'var(--cfgsync-warning)';
     }
 
-    row._defaultBg = hasCloud ? 'rgba(255, 255, 255, 0.035)' : 'rgba(255, 255, 255, 0.015)';
-    row._hoverBg = hasCloud ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.035)';
+    row._defaultBg = hasCloud ? 'color-mix(in srgb, var(--cfgsync-text) 4%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 2%, transparent)';
+    row._hoverBg = hasCloud ? 'color-mix(in srgb, var(--cfgsync-text) 6%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 4%, transparent)';
 
     row.style.cssText = `
       display: flex; flex-direction: column; gap: 7px;
       padding: 10px 12px; border-radius: 6px;
       background: ${row._defaultBg};
-      border: ${hasCloud ? '1px solid rgba(255, 255, 255, 0.08)' : '1px dashed rgba(255, 255, 255, 0.1)'};
+      border: ${hasCloud ? '1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent)' : '1px dashed color-mix(in srgb, var(--cfgsync-text) 10%, transparent)'};
       border-left: 3px solid ${leftBorderColor};
       transition: background 0.15s ease;
     `;
@@ -1445,29 +1428,29 @@ export class CloudConfigPanel {
     if (contentType === 'character') {
       const avatarSrc = `/characters/${encodeURIComponent(item.sourceRef || item.displayName + '.png')}`;
       avatarHtml = `
-        <div style="width:20px; height:20px; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; border-radius:3px; overflow:hidden; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);">
+        <div style="width:20px; height:20px; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; border-radius:3px; overflow:hidden; background:color-mix(in srgb, var(--cfgsync-text) 6%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 12%, transparent);">
           <img class="cfgsync-char-avatar" src="${avatarSrc}" alt="" style="width:100%; height:100%; object-fit:cover; display:block;" onerror="this.style.display='none';" />
         </div>
       `;
     }
 
-    const rowBtnStyle = 'white-space:nowrap !important; width:auto !important; min-width:unset !important; max-width:unset !important; height:25px !important; padding:0 10px !important; margin:0 !important; font-size:12px !important; font-weight:400 !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; background:rgba(255,255,255,0.04) !important; border:1px solid rgba(255,255,255,0.1) !important; color:#c9d1d9 !important; transition:all 0.12s ease !important;';
+    const rowBtnStyle = 'white-space:nowrap !important; width:auto !important; min-width:unset !important; max-width:unset !important; height:25px !important; padding:0 10px !important; margin:0 !important; font-size:12px !important; font-weight:400 !important; display:inline-flex !important; align-items:center !important; justify-content:center !important; border-radius:4px !important; background:color-mix(in srgb, var(--cfgsync-text) 4%, transparent) !important; border:1px solid color-mix(in srgb, var(--cfgsync-text) 10%, transparent) !important; color:var(--cfgsync-text) !important; transition:all 0.12s ease !important;';
 
-    const refText = !row._existsLocally
+    const refText = row.dataset.sourceOwner !== this.accountHandle ? `共享自 @${row.dataset.sourceOwner} · 只读订阅` : !row._existsLocally
       ? `来自云端 (@${cItem?.owner_handle || '云端'}) · 本地未下载`
-      : `${item.sourceRef}${!hasCloud ? ' · 仅本地' : ''}`;
+      : `${escapeHtml(item.sourceRef)}${!hasCloud ? ' · 仅本地' : ''}`;
 
     row.innerHTML = `
       <!-- 上层：复选框 + 完整配置名称 + 状态/快照胶囊 -->
       <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; min-width:0;">
         <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1; overflow:hidden;">
-          <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} title="${isEnabled ? '已开启云同步 (取消勾选停用)' : (hasCloud ? '勾选开启自动同步' : '未同步：勾选后可在推送时自动关联同步')}" style="cursor:pointer; flex-shrink:0; width:15px; height:15px; margin:0; accent-color:#58a6ff;" />
+          <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} title="${isEnabled ? '已开启云同步 (取消勾选停用)' : (hasCloud ? '勾选开启自动同步' : '未同步：勾选后可在推送时自动关联同步')}" style="cursor:pointer; flex-shrink:0; width:15px; height:15px; margin:0; accent-color:var(--cfgsync-accent);" />
           ${avatarHtml}
           ${(contentType === 'chat' || contentType === 'group_chat') && (item.characterName || (item.sourceRef && item.sourceRef.includes('/'))) ? `
-            <span class="cfgsync-chat-char-tag" style="background:rgba(255,255,255,0.08); color:#c9d1d9; font-size:12px; padding:1px 6px; border-radius:3px; border:1px solid rgba(255,255,255,0.14); font-weight:normal; flex-shrink:0;">${item.characterName || item.sourceRef.split('/')[0]}</span>
-            <span class="cfgsync-row-name" title="${item.displayName}" style="font-size:13px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? '#f0f6fc' : '#c9d1d9'}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.chatName || (item.displayName && item.displayName.includes(' / ') ? item.displayName.split(' / ').slice(1).join(' / ') : item.displayName)}</span>
+            <span class="cfgsync-chat-char-tag" style="background:color-mix(in srgb, var(--cfgsync-text) 8%, transparent); color:var(--cfgsync-text); font-size:12px; padding:1px 6px; border-radius:3px; border:1px solid color-mix(in srgb, var(--cfgsync-text) 14%, transparent); font-weight:normal; flex-shrink:0;">${escapeHtml(item.characterName || item.sourceRef.split('/')[0])}</span>
+            <span class="cfgsync-row-name" title="${escapeHtml(item.displayName)}" style="font-size:13px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? 'var(--cfgsync-text)' : 'var(--cfgsync-text)'}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(item.chatName || (item.displayName && item.displayName.includes(' / ') ? item.displayName.split(' / ').slice(1).join(' / ') : item.displayName))}</span>
           ` : `
-            <span class="cfgsync-row-name" title="${item.displayName}" style="font-size:13px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? '#f0f6fc' : '#c9d1d9'}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.displayName}</span>
+            <span class="cfgsync-row-name" title="${escapeHtml(item.displayName)}" style="font-size:13px; font-weight:${hasCloud ? '600' : '400'}; color:${hasCloud ? 'var(--cfgsync-text)' : 'var(--cfgsync-text)'}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(item.displayName)}</span>
           `}
         </div>
         <div class="cfgsync-state-badge-container" style="display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;">
@@ -1477,10 +1460,10 @@ export class CloudConfigPanel {
 
       <!-- 下层：左侧文件来源说明 + 右侧操作按钮组 -->
       <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding-left:23px; min-width:0;">
-        <div class="cfgsync-row-ref" data-source-ref="${item.sourceRef}" title="${item.sourceRef}" style="font-size:12px; color:${subTextColor}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; min-width:0; flex:1;">${refText}</div>
-        <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+        <div class="cfgsync-row-ref" data-source-ref="${escapeHtml(item.sourceRef)}" title="${escapeHtml(item.sourceRef)}" style="font-size:12px; color:${subTextColor}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; min-width:0; flex:1;">${escapeHtml(refText)}</div>
+        <div class="cfgsync-row-actions" style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
           <button class="cfgsync-pull-btn menu_button" type="button" title="${!row._existsLocally ? '从云端拉取此配置保存到本地 (生成本地副本)' : '重新从云端拉取此配置覆盖本地'}" style="${rowBtnStyle} ${!hasCloud ? 'opacity:0.25 !important; pointer-events:none !important;' : 'cursor:pointer !important;'}">拉取</button>
-          <button class="cfgsync-push-btn menu_button" type="button" title="${hasCloud ? '推送到云端 (上传新快照覆盖云端)' : '未同步：立即推送到云端生成首个快照'}" style="${rowBtnStyle} ${!row._existsLocally ? 'opacity:0.25 !important; pointer-events:none !important;' : 'cursor:pointer !important;'}">推送</button>
+          <button class="cfgsync-push-btn menu_button" type="button" title="${hasCloud ? '备份到云端，保存新的快照' : '备份此预设或配置到云端，生成首个快照'}" style="${rowBtnStyle} ${!row._existsLocally ? 'opacity:0.25 !important; pointer-events:none !important;' : 'cursor:pointer !important;'}">备份</button>
           ${contentType !== 'chat' && contentType !== 'group_chat' && (contentType !== 'settings' || this._allowSettingsSharing) ? `
           <button class="cfgsync-share-btn menu_button" type="button" title="${hasCloud ? (contentType === 'settings' ? '家庭共享设置 (生成专属邀请码 / 安全注入 API Key)' : '分享配置 (生成邀请码 / 设为公开)') : '尚未推送到云端，无法分享'}" style="${rowBtnStyle} ${!hasCloud ? 'opacity:0.25 !important; pointer-events:none !important; cursor:not-allowed !important;' : 'cursor:pointer !important;'}">分享</button>
           ` : ''}
@@ -1561,14 +1544,18 @@ export class CloudConfigPanel {
         } else {
           const sourceOwner = row._binding?.source_owner_handle || row._cloudItem?.owner_handle || this.accountHandle;
           const bindingUid = this.storage.makeBindingUid(this.accountHandle, sourceOwner, contentType, item.itemUid);
-          const binding = await this.syncManager.disableSync(bindingUid, false);
+          const backup = await this.storage.getBackup(bindingUid);
+          const choice = await chooseDisable(Boolean(backup));
+          if (choice === 'cancel') { toggle.checked = true; return; }
+          const binding = await this.syncManager.disableSync(bindingUid, choice === 'restore');
+          if (choice === 'restore') notify('已恢复开启同步前的本地备份。请刷新酒馆以加载配置。');
           row._binding = binding;
           this.updateRowState(row, binding, row._cloudItem, row._existsLocally);
         }
       } catch (err) {
         console.error('[cfgsync] toggle error:', err);
         toggle.checked = !toggle.checked;
-        alert(`切换状态失败: ${err.message}`);
+        notify(`切换状态失败: ${escapeHtml(err.message)}`);
       } finally {
         toggle.disabled = false;
       }
@@ -1590,7 +1577,7 @@ export class CloudConfigPanel {
           }
           pushBtn.disabled = true;
           const origHtml = pushBtn.innerHTML;
-          pushBtn.textContent = '推送中...';
+          pushBtn.textContent = '备份中...';
           try {
             let localPayload = null;
             if (contentType === 'settings' && typeof window !== 'undefined') {
@@ -1604,7 +1591,7 @@ export class CloudConfigPanel {
 
             const res = await this.syncManager.pushLocal(row._binding, localPayload, {
               versionTitle,
-              force: true,
+              force: pushOptions.force === true,
               excludeHeavy: pushOptions?.excludeHeavy,
             });
             if (res.conflict) {
@@ -1639,7 +1626,7 @@ export class CloudConfigPanel {
               }
             }
           } catch (e) {
-            alert(`推送失败: ${e.message}`);
+            notify(`推送失败: ${e.message}`);
           } finally {
             pushBtn.disabled = !row._existsLocally;
             pushBtn.innerHTML = origHtml;
@@ -1670,14 +1657,14 @@ export class CloudConfigPanel {
     const deleteBtn = row.querySelector('.cfgsync-delete-btn');
     if (deleteBtn) {
       deleteBtn.onmouseenter = () => {
-        deleteBtn.style.setProperty('color', '#f85149', 'important');
+        deleteBtn.style.setProperty('color', 'var(--cfgsync-danger)', 'important');
         deleteBtn.style.setProperty('border-color', 'rgba(248,81,73,0.4)', 'important');
         deleteBtn.style.setProperty('background', 'rgba(248,81,73,0.1)', 'important');
       };
       deleteBtn.onmouseleave = () => {
-        deleteBtn.style.setProperty('color', '#c9d1d9', 'important');
-        deleteBtn.style.setProperty('border-color', 'rgba(255,255,255,0.1)', 'important');
-        deleteBtn.style.setProperty('background', 'rgba(255,255,255,0.04)', 'important');
+        deleteBtn.style.setProperty('color', 'var(--cfgsync-text)', 'important');
+        deleteBtn.style.setProperty('border-color', 'color-mix(in srgb, var(--cfgsync-text) 10%, transparent)', 'important');
+        deleteBtn.style.setProperty('background', 'color-mix(in srgb, var(--cfgsync-text) 4%, transparent)', 'important');
       };
       deleteBtn.onmousedown = (e) => e.stopPropagation();
       deleteBtn.onclick = (e) => {
@@ -1721,13 +1708,14 @@ export class CloudConfigPanel {
             }
 
             if (deleteLocal && res?.deleted_local === false && res?.local_reason === 'local_file_not_found') {
-              alert('【删除提示】\n\n本地未找到该配置文件，已仅删除云端备份记录。');
+              notify('【删除提示】\n\n本地未找到该配置文件，已仅删除云端备份记录。');
             }
           },
         });
       };
     }
 
+    this.updateRowState(row, initialBinding, cItem, row._existsLocally);
     return row;
   }
 
@@ -1738,14 +1726,14 @@ export class CloudConfigPanel {
       ? `防替换保护：已锁定${ownerTip}，阻止任何云端快照覆盖本地 (点击解锁)`
       : `防替换保护：未锁定${ownerTip} (点击开启防替换锁定)`;
     btn.style.background = isLocked ? 'rgba(250, 173, 20, 0.18)' : 'transparent';
-    btn.style.borderColor = isLocked ? 'rgba(250, 173, 20, 0.45)' : 'rgba(255, 255, 255, 0.12)';
-    btn.style.color = isLocked ? '#faad14' : 'rgba(255, 255, 255, 0.4)';
+    btn.style.borderColor = isLocked ? 'rgba(250, 173, 20, 0.45)' : 'color-mix(in srgb, var(--cfgsync-text) 12%, transparent)';
+    btn.style.color = isLocked ? 'var(--cfgsync-warning)' : 'color-mix(in srgb, var(--cfgsync-text) 40%, transparent)';
   }
 
   renderServerErrorNotice() {
     this.container.innerHTML = `
-      <div style="box-sizing: border-box; width: 100%; background: #1c181a; border: 1px solid rgba(248, 81, 73, 0.4); border-left: 4px solid #f85149; border-radius: 6px; padding: 14px 16px; margin: 4px 0; color: #f5f5f5;">
-        <div style="color: #f85149; font-weight: 600; font-size: 13px; margin-bottom: 8px;">
+      <div style="box-sizing: border-box; width: 100%; background: #1c181a; border: 1px solid rgba(248, 81, 73, 0.4); border-left: 4px solid var(--cfgsync-danger); border-radius: 6px; padding: 14px 16px; margin: 4px 0; color: #f5f5f5;">
+        <div style="color: var(--cfgsync-danger); font-weight: 600; font-size: 13px; margin-bottom: 8px;">
           服务端插件未就绪
         </div>
         <div style="font-size: 12px; line-height: 1.6; margin-bottom: 8px; color: #d0d0d0;">

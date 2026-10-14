@@ -32,7 +32,7 @@ export class ConfigService {
    */
   constructor(configPath = null, initialConfig = {}) {
     this.configPath = configPath;
-    this.config = { ...DEFAULT_CONFIG, ...initialConfig };
+    this.config = { ...structuredClone(DEFAULT_CONFIG), ...initialConfig };
     this.load();
   }
 
@@ -42,7 +42,7 @@ export class ConfigService {
       if (fs.existsSync(this.configPath)) {
         const raw = fs.readFileSync(this.configPath, 'utf-8');
         const parsed = JSON.parse(raw);
-        this.config = { ...DEFAULT_CONFIG, ...parsed };
+        this.config = { ...structuredClone(DEFAULT_CONFIG), ...parsed };
       }
     } catch (err) {
       console.warn('[cfgsync] Failed to load config from disk, using defaults:', err.message);
@@ -56,9 +56,12 @@ export class ConfigService {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2), 'utf-8');
+      const temporary = `${this.configPath}.tmp`;
+      fs.writeFileSync(temporary, JSON.stringify(this.config, null, 2), 'utf-8');
+      fs.renameSync(temporary, this.configPath);
     } catch (err) {
       console.warn('[cfgsync] Failed to save config to disk:', err.message);
+      throw err;
     }
   }
 
@@ -75,17 +78,46 @@ export class ConfigService {
   }
 
   getAll() {
-    return { ...this.config };
+    return structuredClone(this.config);
+  }
+
+  getPublicConfig(isAdmin = false) {
+    const { webdavPassword, ...safe } = this.getAll();
+    if (!isAdmin) {
+      delete safe.webdavUsername;
+      delete safe.webdavUrl;
+      delete safe.localPath;
+    }
+    return { ...safe, webdavPasswordConfigured: Boolean(webdavPassword) };
   }
 
   set(key, value) {
+    const previous = this.config;
+    this.config = { ...this.config };
     this.config[key] = value;
-    this.save();
+    try { this.save(); } catch (error) { this.config = previous; throw error; }
   }
 
   update(partial) {
+    if (!partial || typeof partial !== 'object' || Array.isArray(partial)) {
+      const error = new Error('Configuration must be an object'); error.status = 400; throw error;
+    }
+    const booleanKeys = ['allowSettingsSharing','allowChatSharing','forcePush','excludeHeavyExtensions','autoSyncEnabled','webdavEnabled','localPathEnabled','schedulerEnabled'];
+    for (const [key,value] of Object.entries(partial)) {
+      let valid = false;
+      if (booleanKeys.includes(key)) valid = typeof value === 'boolean';
+      else if (key === 'maxVersions') valid = Number.isInteger(value) && value >= 1 && value <= 1000;
+      else if (key === 'schedulerIntervalMs') valid = Number.isSafeInteger(value) && value >= 60000 && value <= 30 * 86400000;
+      else if (['localPath','webdavUsername','webdavPassword'].includes(key)) valid = typeof value === 'string' && value.length <= 16384;
+      else if (key === 'webdavUrl') {
+        try { valid = value === '' || (typeof value === 'string' && ['http:','https:'].includes(new URL(value).protocol)); } catch {}
+      } else if (key === 'maxVersionsByType') valid = value && typeof value === 'object' && !Array.isArray(value)
+        && Object.entries(value).every(([type,limit]) => /^[a-z][a-z0-9_]*$/.test(type) && Number.isInteger(limit) && limit >= 1 && limit <= 1000);
+      if (!valid) { const error = new Error(`Invalid configuration value: ${key}`); error.status = 400; throw error; }
+    }
+    const previous = this.config;
     this.config = { ...this.config, ...partial };
-    this.save();
+    try { this.save(); } catch (error) { this.config = previous; throw error; }
     return this.getAll();
   }
 }

@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
@@ -13,6 +16,8 @@ import { createPluginRouter } from '../../src/server/routes/router.js';
 import { makeItemUid } from '../../src/common/utils.js';
 
 test('Integration: Cross-Account Sharing System (Phase 2)', async (t) => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'cfgsync_shares_'));
+  t.after(() => fs.rm(tempRoot, { recursive: true, force: true }));
   // 1. 初始化独立测试数据库与环境
   const dbClient = new DatabaseClient(':memory:');
   const adapters = createP0Adapters();
@@ -34,10 +39,12 @@ test('Integration: Cross-Account Sharing System (Phase 2)', async (t) => {
     directories: { userDir: 'test_alice' },
   };
 
-  app.use((req, res, next) => {
+  app.use(async (req, res, next) => {
+    const user = path.join(tempRoot, mockUser.handle);
+    await fs.mkdir(user, { recursive: true });
     req.user = {
       profile: { handle: mockUser.handle },
-      directories: mockUser.directories,
+      directories: { user, root: user },
     };
     next();
   });

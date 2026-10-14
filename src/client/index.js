@@ -4,6 +4,7 @@ import { ClientSyncManager } from './syncManager.js';
 import { ClientPoller } from './poller.js';
 import { AutoSyncEngine } from './autoSync.js';
 import { CloudConfigPanel } from './ui/panel.js';
+import { SseClient } from './sseClient.js';
 
 /**
  * SillyTavern 前端扩展初始化入口
@@ -65,6 +66,10 @@ export async function initExtension() {
   poller.onUpdate((events) => {
     panel.handlePollerUpdate(events);
   });
+  const sse = new SseClient({ onUpdate: () => poller.pollNow() });
+  sse.connect();
+  window.addEventListener('pagehide', () => { sse.close(); poller.stop(); autoSyncEngine.stop(); });
+  window.addEventListener('pageshow', event => { if (event.persisted) { sse.connect(); poller.start(); if (autoSyncEngine.enabled) autoSyncEngine.start(); } });
 
 
   // 4. 注册并挂载到 ST 扩展设置侧边栏抽屉 (#extensions_settings)

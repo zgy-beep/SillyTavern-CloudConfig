@@ -123,15 +123,15 @@ test('Step 3: Character / Theme UI & Sequential One-Click Backup', async (t) => 
 
     const normalHtml = panel.renderVersionSelectorHtml('SYNCED', 2, { owner_handle: 'alice', current_version: 2 }, { enabled: true, last_synced_version: 2 }, true);
     assert.ok(normalHtml.includes('历史快照 ▾'));
-    assert.ok(normalHtml.includes('color:#c9d1d9'));
+    assert.ok(normalHtml.includes('color:var(--cfgsync-text)'));
 
     const conflictHtml = panel.renderVersionSelectorHtml('CONFLICT', 2, { owner_handle: 'alice', current_version: 3 }, { enabled: true, last_synced_version: 2 }, true);
     assert.ok(conflictHtml.includes('冲突 ▾'));
-    assert.ok(conflictHtml.includes('color:#ff7b72'));
+    assert.ok(conflictHtml.includes('color:var(--cfgsync-danger)'));
 
     const unpulledHtml = panel.renderVersionSelectorHtml('CLOUD_AVAILABLE', 1, { owner_handle: 'bob', current_version: 1 }, null, false);
     assert.ok(unpulledHtml.includes('@bob ▾'));
-    assert.ok(unpulledHtml.includes('color:#e3b341'));
+    assert.ok(unpulledHtml.includes('color:var(--cfgsync-warning)'));
   });
 });
 

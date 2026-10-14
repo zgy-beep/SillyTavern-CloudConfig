@@ -36,6 +36,23 @@ CREATE TABLE IF NOT EXISTS config_versions (
   PRIMARY KEY (owner_handle, content_type, item_uid, version)
 );
 
+CREATE TABLE IF NOT EXISTS version_sequences (
+  owner_handle TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  item_uid TEXT NOT NULL,
+  last_version INTEGER NOT NULL,
+  PRIMARY KEY (owner_handle, content_type, item_uid)
+);
+
+CREATE TABLE IF NOT EXISTS import_mappings (
+  owner_handle TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  item_uid TEXT NOT NULL,
+  source_key TEXT NOT NULL,
+  mapped_version INTEGER NOT NULL,
+  PRIMARY KEY (owner_handle, content_type, item_uid, source_key)
+);
+
 CREATE TABLE IF NOT EXISTS change_events (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   owner_handle TEXT NOT NULL,

@@ -25,7 +25,11 @@ export class ClientSyncManager {
 
     // 1. 如果此前处于 DISABLED_RESTORED 或全新开启，创建冷备份
     if (!binding || binding.state === SyncState.DISABLED_RESTORED || binding.state === SyncState.DISABLED) {
-      if (localContent) {
+      if (localContent === null && this.api.readLocal) {
+        try { localContent = (await this.api.readLocal(contentType, itemUid)).content; }
+        catch (error) { if (error.status !== 404) throw error; }
+      }
+      if (localContent !== null && localContent !== undefined) {
         await this.storage.saveBackup(bindingUid, accountHandle, localContent);
       }
 
@@ -36,7 +40,7 @@ export class ClientSyncManager {
         item_uid: itemUid,
         display_name: displayName,
         source_owner_handle: sourceOwner,
-        sync_mode: sourceOwner !== accountHandle ? SyncMode.SUBSCRIBE : SyncMode.OWN,
+        sync_mode: sourceOwner !== accountHandle ? SyncMode.SHARED_READONLY : SyncMode.OWN,
         enabled: true,
         state: SyncState.BACKUP_CREATED,
         last_notified_version: 0,
@@ -47,6 +51,7 @@ export class ClientSyncManager {
       await this.storage.saveBinding(binding);
     } else {
       binding.enabled = true;
+      binding.sync_mode = sourceOwner !== accountHandle ? SyncMode.SHARED_READONLY : SyncMode.OWN;
       await this.storage.saveBinding(binding);
     }
 
@@ -65,9 +70,9 @@ export class ClientSyncManager {
 
     if (shouldRestore) {
       const backup = await this.storage.getBackup(bindingUid);
-      if (backup && backup.snapshot_content && applyLocalCb) {
-        await applyLocalCb(backup.snapshot_content);
-      }
+      if (!backup || backup.snapshot_content === undefined) throw new Error('没有可恢复的本地备份');
+      if (applyLocalCb) await applyLocalCb(backup.snapshot_content);
+      else await this.api.restoreLocal(binding.content_type, binding.item_uid, backup.snapshot_content, binding.display_name);
       binding.state = SyncState.DISABLED_RESTORED;
     } else {
       binding.state = SyncState.DISABLED;
@@ -82,6 +87,8 @@ export class ClientSyncManager {
    * 将本地配置推送到云端（支持时间快照与网盘式直传）
    */
   async pushLocal(binding, localPayload, options = {}) {
+    if (binding.source_owner_handle && binding.account_handle
+      && binding.source_owner_handle !== binding.account_handle) throw new Error('共享配置为只读，请拉取所有者的更新');
     try {
       const res = await this.api.push({
         contentType: binding.content_type,
@@ -92,7 +99,8 @@ export class ClientSyncManager {
         payload: localPayload,
         clientId: this.clientId,
         versionTitle: options.versionTitle,
-        force: options.force !== undefined ? options.force : true,
+        force: options.force === true,
+        skipUnchanged: options.skipUnchanged === true,
         excludeHeavy: options.excludeHeavy !== undefined ? options.excludeHeavy : options.exclude_heavy,
       });
 
@@ -102,7 +110,7 @@ export class ClientSyncManager {
       binding.state = SyncState.SYNCED;
       await this.storage.saveBinding(binding);
 
-      return { success: true, version: res.version, versionTitle: res.version_title };
+      return { success: true, ...res, versionTitle: res.version_title };
     } catch (err) {
       if (err.status === 409) {
         binding.state = SyncState.CONFLICT;
@@ -163,6 +171,7 @@ export class ClientSyncManager {
         operation: 'UPSERT',
         payload: localPayload,
         clientId: this.clientId,
+        force: false,
       });
 
       binding.last_synced_version = res.version;

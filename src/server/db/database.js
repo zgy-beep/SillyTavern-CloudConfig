@@ -24,10 +24,13 @@ export class DatabaseClient {
     // 启用 WAL 模式与外键约束
     if (this.dbPath !== ':memory:') {
       this.db.exec('PRAGMA journal_mode = WAL;');
-      this.db.exec('PRAGMA synchronous = NORMAL;');
+      this.db.exec('PRAGMA synchronous = FULL;');
     }
     this.db.exec('PRAGMA foreign_keys = ON;');
     this.db.exec(SCHEMA_SQL);
+    this.db.exec(`INSERT INTO version_sequences (owner_handle,content_type,item_uid,last_version)
+      SELECT owner_handle,content_type,item_uid,MAX(version) FROM config_versions GROUP BY owner_handle,content_type,item_uid
+      ON CONFLICT(owner_handle,content_type,item_uid) DO UPDATE SET last_version=MAX(last_version,excluded.last_version)`);
 
     // 模式版本守卫与增量迁移（Phase 2: user_version 2; Phase 3: user_version 3）
     const versionRow = this.db.prepare('PRAGMA user_version;').get();

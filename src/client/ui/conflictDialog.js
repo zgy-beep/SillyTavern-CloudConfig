@@ -1,3 +1,4 @@
+import { mountDialog, escapeHtml, notify } from './dialog.js';
 /**
  * 409 并发冲突处理弹窗
  */
@@ -17,11 +18,11 @@ export function showConflictDialog({
   const modal = document.createElement('div');
   modal.className = 'cfgsync-modal';
   modal.style.cssText = `
-    background: #1c202a !important;
-    color: #e6edf3 !important;
+    background: var(--cfgsync-bg) !important;
+    color: var(--cfgsync-text) !important;
     padding: 24px; border-radius: 12px; max-width: 420px; width: 90%;
     box-shadow: 0 16px 48px rgba(0,0,0,0.75), 0 0 0 1px rgba(255, 77, 79, 0.4);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: inherit;
   `;
 
   // 强制覆盖 menu_button 的共用按钮样式，避免被酒馆 CSS 压缩按钮宽度
@@ -41,19 +42,19 @@ export function showConflictDialog({
       <span style="font-size:16px; font-weight:700; color:#ff4d4f;">云端配置冲突</span>
     </div>
     <p style="font-size:13px; line-height:1.7; margin:0 0 20px 0; opacity:0.9;">
-      配置项 <strong>${displayName}</strong> 已被其它设备更新（云端当前版本：<strong>v${serverVersion}</strong>）。<br>
+      配置项 <strong>${escapeHtml(displayName)}</strong> 已被其它设备更新（云端当前版本：<strong>v${serverVersion}</strong>）。<br>
       为防止静默覆盖导致数据丢失，请选择处理策略：
     </p>
     <div style="display:flex; flex-direction:column; gap:10px;">
-      <button id="cfgsync-pull-btn" class="menu_button" style="${btnBase} background:#1890ff !important; color:#fff !important;">
+      <button id="cfgsync-pull-btn" class="menu_button" style="${btnBase} background:var(--cfgsync-accent) !important; color:#fff !important;">
         <span style="font-size:18px; flex-shrink:0;">📥</span>
         <span>拉取云端最新版本（覆盖本地）</span>
       </button>
-      <button id="cfgsync-overwrite-btn" class="menu_button" style="${btnBase} background:rgba(250,173,20,0.15) !important; color:#faad14 !important; border:1px solid rgba(250,173,20,0.4) !important;">
+      <button id="cfgsync-overwrite-btn" class="menu_button" style="${btnBase} background:rgba(250,173,20,0.15) !important; color:var(--cfgsync-warning) !important; border:1px solid rgba(250,173,20,0.4) !important;">
         <span style="font-size:18px; flex-shrink:0;">⚠️</span>
         <span>仍然覆盖云端（不推荐）</span>
       </button>
-      <button id="cfgsync-cancel-btn" class="menu_button" style="${btnBase} background:rgba(255,255,255,0.06) !important; color:rgba(255,255,255,0.7) !important; border:1px solid rgba(255,255,255,0.12) !important;">
+      <button id="cfgsync-cancel-btn" class="menu_button" style="${btnBase} background:color-mix(in srgb, var(--cfgsync-text) 6%, transparent) !important; color:color-mix(in srgb, var(--cfgsync-text) 70%, transparent) !important; border:1px solid color-mix(in srgb, var(--cfgsync-text) 12%, transparent) !important;">
         <span style="font-size:18px; flex-shrink:0;">✖</span>
         <span>取消，稍后手动处理</span>
       </button>
@@ -61,17 +62,26 @@ export function showConflictDialog({
   `;
 
   overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+  mountDialog(overlay);
 
   ['click', 'mousedown', 'mouseup', 'pointerdown', 'touchstart'].forEach((evt) => {
     overlay.addEventListener(evt, (e) => e.stopPropagation());
   });
 
-  const close = (choice) => {
-    if (overlay.parentNode) {
-      overlay.parentNode.removeChild(overlay);
+  let busy = false;
+  const close = async (choice) => {
+    if (busy) return;
+    busy = true;
+    const buttons = [...modal.querySelectorAll('button')];
+    buttons.forEach(button => { button.disabled = true; });
+    try {
+      if (onResolve) await onResolve(choice);
+      overlay.remove();
+    } catch (error) {
+      notify(error.status === 409 ? '云端再次更新，请重新查看最新版本后处理。' : `处理失败：${error.message}`, 'error');
+    } finally {
+      busy = false; buttons.forEach(button => { button.disabled = false; });
     }
-    if (onResolve) onResolve(choice);
   };
 
   overlay.addEventListener('click', (e) => {

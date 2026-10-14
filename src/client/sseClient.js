@@ -22,8 +22,8 @@ export class SseClient {
     if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
       return;
     }
-    this.closed = false;
     this.close();
+    this.closed = false;
 
     try {
       this.eventSource = new window.EventSource(this.url);

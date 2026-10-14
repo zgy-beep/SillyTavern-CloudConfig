@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
+import { assertSafePath } from '../utils/SafePaths.js';
 
 /**
  * 带有超时保护的异步执行器，防范断开的 SMB/CIFS 挂载死锁 Node.js 线程池 (BUG-P6-04)
@@ -94,9 +95,7 @@ export class LocalPathStorageDriver {
       // 安全防目录穿越
       const resolved = path.resolve(fullPath);
       const resolvedBase = path.resolve(this.basePath);
-      if (!resolved.startsWith(resolvedBase)) {
-        throw new Error(`Path traversal denied: ${relPath}`);
-      }
+      assertSafePath(resolvedBase, resolved);
 
       await fs.mkdir(path.dirname(fullPath), { recursive: true });
       const tmpPath = `${fullPath}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
@@ -124,6 +123,7 @@ export class LocalPathStorageDriver {
     if (!this.enabled || !this.basePath) return null;
     try {
       const fullPath = path.join(this.basePath, relPath.replace(/\\/g, '/'));
+      assertSafePath(this.basePath, fullPath);
       return await withTimeout(fs.readFile(fullPath), timeoutMs, `LocalPath 读取超时（限时 ${timeoutMs}ms）`);
     } catch (err) {
       return null;
@@ -139,6 +139,7 @@ export class LocalPathStorageDriver {
     if (!this.enabled || !this.basePath) return;
     try {
       const fullPath = path.join(this.basePath, relPath.replace(/\\/g, '/'));
+      assertSafePath(this.basePath, fullPath);
       await withTimeout(fs.unlink(fullPath), timeoutMs);
     } catch (err) {
       // 忽略文件不存在或删除失败

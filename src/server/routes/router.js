@@ -7,6 +7,7 @@ import { SseService } from '../services/SseService.js';
 import { DiagnosticService } from '../services/DiagnosticService.js';
 import { DisasterRecoveryService } from '../services/DisasterRecoveryService.js';
 import { StorageMirrorService } from '../services/StorageMirrorService.js';
+import { validateSegment } from '../utils/SafePaths.js';
 
 /**
  * 创建 Express 路由
@@ -63,6 +64,29 @@ export function createPluginRouter({
   };
 
   router.use(requireAuth);
+
+  router.get('/local-content', asyncHandler(async (req, res) => {
+    const { content_type: contentType, item_uid: itemUid } = req.query;
+    validateSegment(itemUid, 'item_uid');
+    const adapter = syncService.getAdapter(contentType);
+    const items = await adapter.listItems(req.authContext.directories);
+    if (!items.some(item => item.itemUid === itemUid)) return res.status(404).json({ message: 'Local item does not exist' });
+    res.json({ content: await adapter.read(req.authContext.directories, itemUid, { excludeHeavy: false }) });
+  }));
+
+  router.post('/restore-local', asyncHandler(async (req, res) => {
+    const { content_type: contentType, item_uid: itemUid, display_name: displayName } = req.body;
+    validateSegment(itemUid, 'item_uid');
+    const adapter = syncService.getAdapter(contentType);
+    if (syncService.isLocked(req.authContext.handle, req.authContext.handle, contentType, itemUid)) return res.status(423).json({ message: 'Local configuration is locked' });
+    let content = req.body.content;
+    if (content?.type === 'Buffer' && Array.isArray(content.data)) content = Buffer.from(content.data);
+    if (content?.buffer?.type === 'Buffer' && Array.isArray(content.buffer.data)) content = { ...content, buffer: Buffer.from(content.buffer.data) };
+    if (!adapter.validate(content)) return res.status(400).json({ message: 'Invalid backup content' });
+    await adapter.restore(req.authContext.directories, itemUid, content, displayName);
+    audit?.log({ actor: req.authContext.handle, action: 'restore_local', contentType, itemUid, result: 'success' });
+    res.json({ success: true, reload_strategy: adapter.getReloadStrategy() });
+  }));
 
   // 0. GET /events (Server-Sent Events 实时事件流，P5-7, N-7, N-12, TC11)
   router.get('/events', (req, res) => {
@@ -325,6 +349,7 @@ export function createPluginRouter({
       checksum = null,
       payload = null,
       client_id: clientId = 'unknown',
+      skip_unchanged: skipUnchanged = false,
     } = req.body;
 
     if (!contentType || !itemUid || (baseVersion === undefined && !force)) {
@@ -350,6 +375,7 @@ export function createPluginRouter({
       checksum,
       payload,
       clientId,
+      skipUnchanged: skipUnchanged === true,
     });
 
     audit?.log({
@@ -363,7 +389,7 @@ export function createPluginRouter({
       details: { version: result.version, operation, version_title: result.version_title },
     });
 
-    sse.broadcastEvent({
+    if (!result.unchanged) sse.broadcastEvent({
       seq: result.seq || Date.now(),
       owner_handle: req.authContext.handle,
       content_type: contentType,
@@ -586,7 +612,7 @@ export function createPluginRouter({
       req.authContext?.isAdmin === true
     );
     res.json({
-      config: configService?.getAll() || {},
+      config: configService?.getPublicConfig(isAdmin) || {},
       is_admin: isAdmin,
     });
   });
@@ -603,8 +629,9 @@ export function createPluginRouter({
         message: 'Administrator privileges required to update configuration',
       });
     }
-    const updated = configService?.update(req.body) || {};
-    res.json({ success: true, config: updated });
+    configService?.update(req.body);
+    if (schedulerService) schedulerService.start().catch(error => console.warn('[cfgsync:scheduler]', error.message));
+    res.json({ success: true, config: configService?.getPublicConfig(true) || {} });
   });
 
   // 10.6 POST /lock (服务端防替换锁定保护，N-1 ~ N-3, N-5)

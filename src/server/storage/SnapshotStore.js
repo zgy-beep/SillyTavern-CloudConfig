@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { validateSegment, assertSafePath } from '../utils/SafePaths.js';
 import { DEFAULT_MAX_VERSIONS } from '../../common/constants.js';
 
 /**
@@ -15,8 +17,13 @@ export class SnapshotStore {
    * @returns {string}
    */
   getItemDir(directories, contentType, itemUid) {
-    const baseDir = directories?.user || directories?.root || '.';
-    return path.join(baseDir, '.cfgsync', contentType, itemUid);
+    const baseDir = directories?.user || directories?.root;
+    if (!baseDir) throw new Error('Account data directory is required');
+    validateSegment(contentType, 'content_type');
+    validateSegment(itemUid, 'item_uid');
+    const dir = path.resolve(baseDir, '.cfgsync', contentType, itemUid);
+    assertSafePath(baseDir, dir);
+    return dir;
   }
 
   /**
@@ -30,15 +37,19 @@ export class SnapshotStore {
    * @returns {Promise<{ tmpPath: string, targetPath: string }>}
    */
   async prepareTempBlob(directories, contentType, itemUid, version, ext, buffer) {
+    validateSegment(ext, 'file extension');
+    if (!Number.isSafeInteger(version) || version < 0) throw new Error('Invalid snapshot version');
     const dir = this.getItemDir(directories, contentType, itemUid);
     await fs.mkdir(dir, { recursive: true });
+    assertSafePath(directories.user || directories.root, dir);
 
-    const fileName = `v${version}.${ext}`;
+    // Immutable unique names prevent concurrent uploads/imports replacing a live blob.
+    const fileName = `v${version}-${randomUUID()}.${ext}`;
     const targetPath = path.join(dir, fileName);
     const tmpPath = path.join(dir, `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}.tmp`);
 
     // 写入临时文件并落盘
-    const fileHandle = await fs.open(tmpPath, 'w');
+    const fileHandle = await fs.open(tmpPath, 'wx');
     try {
       await fileHandle.write(buffer);
       await fileHandle.sync(); // 强制写入硬件
@@ -57,6 +68,11 @@ export class SnapshotStore {
    */
   async commitBlob(tmpPath, targetPath) {
     await fs.rename(tmpPath, targetPath);
+    // On POSIX, persist the directory entry before SQLite publishes its reference.
+    if (process.platform !== 'win32') {
+      const handle = await fs.open(path.dirname(targetPath), 'r');
+      try { await handle.sync(); } finally { await handle.close(); }
+    }
     return targetPath;
   }
 
@@ -130,6 +146,7 @@ export class SnapshotStore {
     }
 
     const now = Date.now();
+    const active = new Set([...activeBlobPaths].map(p => path.resolve(p)));
     const scanDir = async (currentDir) => {
       let entries = [];
       try {
@@ -147,7 +164,7 @@ export class SnapshotStore {
           try {
             const stat = await fs.stat(fullPath);
             const age = now - stat.mtimeMs;
-            if (age > maxAgeMs && !activeBlobPaths.has(fullPath)) {
+            if (age > maxAgeMs && !active.has(path.resolve(fullPath))) {
               await fs.unlink(fullPath);
             }
           } catch {

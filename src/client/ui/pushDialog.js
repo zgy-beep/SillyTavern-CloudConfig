@@ -1,3 +1,4 @@
+import { mountDialog, escapeHtml, notify } from './dialog.js';
 /**
  * 网盘式云端快照直传弹窗 (Option A - 轻量弹窗)
  */
@@ -30,11 +31,11 @@ export function showPushDialog({ displayName, contentType, onConfirm }) {
   const modal = document.createElement('div');
   modal.className = 'cfgsync-modal';
   modal.style.cssText = `
-    background: #1c202a !important;
-    color: #e6edf3 !important;
+    background: var(--cfgsync-bg) !important;
+    color: var(--cfgsync-text) !important;
     padding: 22px 24px; border-radius: 12px; max-width: 420px; width: 90%;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.1);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px color-mix(in srgb, var(--cfgsync-text) 10%, transparent);
+    font-family: inherit;
     box-sizing: border-box;
   `;
 
@@ -42,45 +43,49 @@ export function showPushDialog({ displayName, contentType, onConfirm }) {
   const isSettings = contentType === 'settings';
 
   modal.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; border-bottom:1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent); padding-bottom:10px;">
       <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-        <div style="width:34px; height:34px; border-radius:8px; background:rgba(24,144,255,0.15); border:1px solid rgba(24,144,255,0.35); display:flex; align-items:center; justify-content:center; color:#1890ff; flex-shrink:0;">
+        <div style="width:34px; height:34px; border-radius:8px; background:rgba(24,144,255,0.15); border:1px solid rgba(24,144,255,0.35); display:flex; align-items:center; justify-content:center; color:var(--cfgsync-accent); flex-shrink:0;">
           <i class="fa-solid fa-cloud-arrow-up" style="font-size:14px;"></i>
         </div>
         <div style="min-width:0; flex:1;">
-          <div style="font-size:15px; font-weight:600; color:#f0f6fc; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${displayName}">保存云端快照</div>
-          <div style="font-size:11.5px; color:#8b949e; line-height:1.3; margin-top:2px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${displayName}</div>
+          <div style="font-size:15px; font-weight:600; color:var(--cfgsync-text); line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${escapeHtml(displayName)}">保存云端快照</div>
+          <div style="font-size:11.5px; color:var(--cfgsync-muted); line-height:1.3; margin-top:2px; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">${escapeHtml(displayName)}</div>
         </div>
       </div>
-      <button id="cfgsync-push-close-x" type="button" style="width:26px; height:26px; border-radius:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#8b949e; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0; transition:all 0.15s ease;">&times;</button>
+      <button id="cfgsync-push-close-x" type="button" style="width:26px; height:26px; border-radius:6px; background:color-mix(in srgb, var(--cfgsync-text) 6%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 10%, transparent); color:var(--cfgsync-muted); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0; transition:all 0.15s ease;">&times;</button>
     </div>
 
     <div style="margin: 14px 0 16px 0;">
-      <label style="display:block; font-size:12px; font-weight:500; color:#c9d1d9; margin-bottom:6px;">快照备注 (默认当前时间，可直接回车保存)</label>
-      <input id="cfgsync-push-title-input" type="text" maxlength="64" value="${defaultTitle}" placeholder="快照备注 (例如: 调优版，留空使用当前时间)" spellcheck="false" autocomplete="off" style="width:100%; box-sizing:border-box; padding:9px 12px; font-size:13px; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; border-radius:7px; border:1.5px solid rgba(255,255,255,0.18); background:#12151d; color:#58a6ff; outline:none; transition:border-color 0.2s ease, box-shadow 0.2s ease;" />
+      <label style="display:block; font-size:12px; font-weight:500; color:var(--cfgsync-text); margin-bottom:6px;">快照备注 (默认当前时间，可直接回车保存)</label>
+      <input id="cfgsync-push-title-input" type="text" maxlength="64" value="${defaultTitle}" placeholder="快照备注 (例如: 调优版，留空使用当前时间)" spellcheck="false" autocomplete="off" style="width:100%; box-sizing:border-box; padding:9px 12px; font-size:13px; font-family: inherit; border-radius:7px; border:1.5px solid color-mix(in srgb, var(--cfgsync-text) 18%, transparent); background:var(--cfgsync-surface); color:var(--cfgsync-accent); outline:none; transition:border-color 0.2s ease, box-shadow 0.2s ease;" />
       
       <div style="margin-top:10px; display:flex; flex-direction:column; gap:4px;">
-        <div style="font-size:11.5px; color:#8b949e; display:flex; align-items:center; gap:6px;">
-          <i class="fa-solid fa-clock-rotate-left" style="color:#69c0ff; font-size:11px;"></i>
-          <span>网盘直传模式，自动保留最近 20 个快照版本</span>
+        <div style="font-size:11.5px; color:var(--cfgsync-muted); display:flex; align-items:center; gap:6px;">
+          <i class="fa-solid fa-clock-rotate-left" style="color:var(--cfgsync-accent); font-size:11px;"></i>
+          <span>上传后保留独立快照，可从历史版本中恢复</span>
         </div>
         ${isSettings ? `
-        <div style="margin-top:6px; padding:8px 10px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px;">
-          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; color:#e6edf3; user-select:none;">
-            <input id="cfgsync-exclude-heavy-cb" type="checkbox" checked style="accent-color:#1890ff; width:15px; height:15px; cursor:pointer;" />
+        <div style="margin-top:6px; padding:8px 10px; background:color-mix(in srgb, var(--cfgsync-text) 3%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent); border-radius:6px;">
+          <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; color:var(--cfgsync-text); user-select:none;">
+            <input id="cfgsync-exclude-heavy-cb" type="checkbox" checked style="accent-color:var(--cfgsync-accent); width:15px; height:15px; cursor:pointer;" />
             <span style="font-weight:500;">精简酒馆助手 (TavernHelper) 缓存数据</span>
           </label>
-          <div id="cfgsync-heavy-hint" style="font-size:11px; color:#8b949e; margin-top:4px; margin-left:23px; line-height:1.4;">
-            建议精简：排除插件运行期庞大变量与脚本缓存（预估体积 <span style="color:#52c41a; font-weight:600;">~1.0 MB</span>，省流且同步迅速）
+          <div id="cfgsync-heavy-hint" style="font-size:11px; color:var(--cfgsync-muted); margin-top:4px; margin-left:23px; line-height:1.4;">
+            建议精简：排除插件运行期庞大变量与脚本缓存（预估体积 <span style="color:var(--cfgsync-success); font-weight:600;">~1.0 MB</span>，省流且同步迅速）
           </div>
         </div>
         ` : ''}
       </div>
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-top:14px;font-size:12px;color:var(--cfgsync-muted);">
+        <input id="cfgsync-force-push" type="checkbox" />
+        <span>允许将本地旧内容设为云端最新<br><small>云端已有更新时跳过冲突提醒，历史快照仍会保留。</small></span>
+      </label>
     </div>
 
     <div style="display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-top:16px;">
-      <button id="cfgsync-push-cancel-btn" type="button" style="padding:7px 16px; border-radius:6px; font-size:12.5px; font-weight:500; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); color:#c9d1d9; cursor:pointer; transition:all 0.15s ease;">取消</button>
-      <button id="cfgsync-push-submit-btn" type="button" style="display:inline-flex; align-items:center; gap:6px; padding:7px 20px; border-radius:6px; font-size:12.5px; font-weight:600; background:#238636; border:1px solid rgba(255,255,255,0.12); color:#ffffff; cursor:pointer; transition:all 0.15s ease; box-shadow:0 1px 4px rgba(0,0,0,0.3);">
+      <button id="cfgsync-push-cancel-btn" type="button" style="padding:7px 16px; border-radius:6px; font-size:12.5px; font-weight:500; background:color-mix(in srgb, var(--cfgsync-text) 8%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 15%, transparent); color:var(--cfgsync-text); cursor:pointer; transition:all 0.15s ease;">取消</button>
+      <button id="cfgsync-push-submit-btn" type="button" style="display:inline-flex; align-items:center; gap:6px; padding:7px 20px; border-radius:6px; font-size:12.5px; font-weight:600; background:var(--cfgsync-success); border:1px solid color-mix(in srgb, var(--cfgsync-text) 12%, transparent); color:#ffffff; cursor:pointer; transition:all 0.15s ease; box-shadow:0 1px 4px rgba(0,0,0,0.3);">
         <i class="fa-solid fa-cloud-arrow-up"></i>
         <span>立即上传</span>
       </button>
@@ -88,7 +93,7 @@ export function showPushDialog({ displayName, contentType, onConfirm }) {
   `;
 
   overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+  mountDialog(overlay);
 
   const close = () => {
     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
@@ -132,9 +137,9 @@ export function showPushDialog({ displayName, contentType, onConfirm }) {
     }
     const updateHint = () => {
       if (heavyCb.checked) {
-        heavyHint.innerHTML = '建议精简：排除插件运行期庞大变量与脚本缓存（预估体积 <span style="color:#52c41a; font-weight:600;">~1.0 MB</span>，省流且同步迅速）';
+        heavyHint.innerHTML = '建议精简：排除插件运行期庞大变量与脚本缓存（预估体积 <span style="color:var(--cfgsync-success); font-weight:600;">~1.0 MB</span>，省流且同步迅速）';
       } else {
-        heavyHint.innerHTML = '完整上传：包含酒馆助手全部运行期缓存（预估体积 <span style="color:#faad14; font-weight:600;">~6.6 MB</span>，耗时可能较长）';
+        heavyHint.innerHTML = '完整上传：包含酒馆助手全部运行期缓存（预估体积 <span style="color:var(--cfgsync-warning); font-weight:600;">~6.6 MB</span>，耗时可能较长）';
       }
     };
     heavyCb.onchange = () => {
@@ -148,12 +153,12 @@ export function showPushDialog({ displayName, contentType, onConfirm }) {
 
   // 获得焦点时选中全部文字方便修改
   input.onfocus = () => {
-    input.style.borderColor = '#1890ff';
+    input.style.borderColor = 'var(--cfgsync-accent)';
     input.style.boxShadow = '0 0 0 3px rgba(24, 144, 255, 0.2)';
     input.select();
   };
   input.onblur = () => {
-    input.style.borderColor = 'rgba(255,255,255,0.18)';
+    input.style.borderColor = 'color-mix(in srgb, var(--cfgsync-text) 18%, transparent)';
     input.style.boxShadow = 'none';
   };
   setTimeout(() => input.focus(), 50);
@@ -165,13 +170,13 @@ export function showPushDialog({ displayName, contentType, onConfirm }) {
     submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>上传中...</span>';
     try {
       if (onConfirm) {
-        await onConfirm(title, { excludeHeavy });
+        await onConfirm(title, { excludeHeavy, force: modal.querySelector('#cfgsync-force-push').checked });
       }
       close();
     } catch (err) {
       submitBtn.disabled = false;
       submitBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i><span>立即上传</span>';
-      alert(`上传失败: ${err.message}`);
+      notify(`上传失败: ${escapeHtml(err.message)}`);
     }
   };
 

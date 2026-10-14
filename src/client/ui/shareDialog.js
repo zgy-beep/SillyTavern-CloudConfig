@@ -1,3 +1,4 @@
+import { mountDialog, escapeHtml, notify } from './dialog.js';
 /**
  * 跨账号分享与认领弹窗 (Phase 2 - 高对比度现代化主题)
  */
@@ -20,38 +21,38 @@ export function showClaimDialog({ api, onClaimed }) {
   const modal = document.createElement('div');
   modal.className = 'cfgsync-modal';
   modal.style.cssText = `
-    background: #1c202a !important;
-    color: #e6edf3 !important;
+    background: var(--cfgsync-bg) !important;
+    color: var(--cfgsync-text) !important;
     padding: 22px 24px; border-radius: 12px; max-width: 400px; width: 90%;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.1);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px color-mix(in srgb, var(--cfgsync-text) 10%, transparent);
+    font-family: inherit;
     box-sizing: border-box;
   `;
 
   modal.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px;">
       <div style="display:flex; align-items:center; gap:10px;">
-        <div style="width:34px; height:34px; border-radius:8px; background:rgba(82,196,26,0.15); border:1px solid rgba(82,196,26,0.35); display:flex; align-items:center; justify-content:center; color:#52c41a; flex-shrink:0;">
+        <div style="width:34px; height:34px; border-radius:8px; background:rgba(82,196,26,0.15); border:1px solid rgba(82,196,26,0.35); display:flex; align-items:center; justify-content:center; color:var(--cfgsync-success); flex-shrink:0;">
           <i class="fa-solid fa-key" style="font-size:14px;"></i>
         </div>
         <div>
-          <div style="font-size:15px; font-weight:600; color:#f0f6fc; line-height:1.3;">认领配置分享码</div>
-          <div style="font-size:11.5px; color:#8b949e; line-height:1.3; margin-top:2px;">输入好友发给你的 8 位分享邀请码</div>
+          <div style="font-size:15px; font-weight:600; color:var(--cfgsync-text); line-height:1.3;">认领配置分享码</div>
+          <div style="font-size:11.5px; color:var(--cfgsync-muted); line-height:1.3; margin-top:2px;">输入好友发给你的 8 位分享邀请码</div>
         </div>
       </div>
-      <button id="cfgsync-claim-close-x" type="button" style="width:26px; height:26px; border-radius:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#8b949e; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0; transition:all 0.15s ease;">&times;</button>
+      <button id="cfgsync-claim-close-x" type="button" style="width:26px; height:26px; border-radius:6px; background:color-mix(in srgb, var(--cfgsync-text) 6%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 10%, transparent); color:var(--cfgsync-muted); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0; transition:all 0.15s ease;">&times;</button>
     </div>
 
     <div style="margin: 16px 0 14px 0;">
-      <label style="display:block; font-size:11.5px; font-weight:500; color:#8b949e; margin-bottom:6px;">8 位邀请码</label>
-      <input id="cfgsync-claim-code-input" type="text" maxlength="8" placeholder="例如: K7X9M2PQ" spellcheck="false" autocomplete="off" style="width:100%; box-sizing:border-box; padding:10px 14px; font-size:18px; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-weight:700; text-transform:uppercase; letter-spacing:3px; text-align:center; border-radius:8px; border:1.5px solid rgba(255,255,255,0.18); background:#12151d; color:#58a6ff; outline:none; transition:border-color 0.2s ease, box-shadow 0.2s ease;" />
+      <label style="display:block; font-size:11.5px; font-weight:500; color:var(--cfgsync-muted); margin-bottom:6px;">8 位邀请码</label>
+      <input id="cfgsync-claim-code-input" type="text" maxlength="8" placeholder="例如: K7X9M2PQ" spellcheck="false" autocomplete="off" style="width:100%; box-sizing:border-box; padding:10px 14px; font-size:18px; font-family: inherit; font-weight:700; text-transform:uppercase; letter-spacing:3px; text-align:center; border-radius:8px; border:1.5px solid color-mix(in srgb, var(--cfgsync-text) 18%, transparent); background:var(--cfgsync-surface); color:var(--cfgsync-accent); outline:none; transition:border-color 0.2s ease, box-shadow 0.2s ease;" />
       <div id="cfgsync-claim-error" style="display:none; padding:8px 12px; border-radius:6px; background:rgba(255,77,79,0.15); border:1px solid rgba(255,77,79,0.35); color:#ff7875; font-size:11.5px; margin-top:8px; line-height:1.4;"></div>
       <div id="cfgsync-claim-success" style="display:none; padding:8px 12px; border-radius:6px; background:rgba(82,196,26,0.15); border:1px solid rgba(82,196,26,0.35); color:#73d13d; font-size:12px; margin-top:8px; line-height:1.4;"></div>
     </div>
 
     <div style="display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-top:16px;">
-      <button id="cfgsync-claim-cancel-btn" type="button" style="padding:7px 16px; border-radius:6px; font-size:12.5px; font-weight:500; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); color:#c9d1d9; cursor:pointer; transition:all 0.15s ease;">取消</button>
-      <button id="cfgsync-claim-submit-btn" type="button" style="display:inline-flex; align-items:center; gap:6px; padding:7px 20px; border-radius:6px; font-size:12.5px; font-weight:600; background:#238636; border:1px solid rgba(255,255,255,0.12); color:#ffffff; cursor:pointer; transition:all 0.15s ease; box-shadow:0 1px 4px rgba(0,0,0,0.3);">
+      <button id="cfgsync-claim-cancel-btn" type="button" style="padding:7px 16px; border-radius:6px; font-size:12.5px; font-weight:500; background:color-mix(in srgb, var(--cfgsync-text) 8%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 15%, transparent); color:var(--cfgsync-text); cursor:pointer; transition:all 0.15s ease;">取消</button>
+      <button id="cfgsync-claim-submit-btn" type="button" style="display:inline-flex; align-items:center; gap:6px; padding:7px 20px; border-radius:6px; font-size:12.5px; font-weight:600; background:var(--cfgsync-success); border:1px solid color-mix(in srgb, var(--cfgsync-text) 12%, transparent); color:#ffffff; cursor:pointer; transition:all 0.15s ease; box-shadow:0 1px 4px rgba(0,0,0,0.3);">
         <i class="fa-solid fa-check"></i>
         <span>确认认领</span>
       </button>
@@ -59,7 +60,7 @@ export function showClaimDialog({ api, onClaimed }) {
   `;
 
   overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+  mountDialog(overlay);
 
   const close = () => {
     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
@@ -89,11 +90,11 @@ export function showClaimDialog({ api, onClaimed }) {
 
   // 输入框获得焦点高亮
   input.onfocus = () => {
-    input.style.borderColor = '#52c41a';
+    input.style.borderColor = 'var(--cfgsync-success)';
     input.style.boxShadow = '0 0 0 3px rgba(82, 196, 26, 0.2)';
   };
   input.onblur = () => {
-    input.style.borderColor = 'rgba(255,255,255,0.18)';
+    input.style.borderColor = 'color-mix(in srgb, var(--cfgsync-text) 18%, transparent)';
     input.style.boxShadow = 'none';
   };
   input.focus();
@@ -161,36 +162,36 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
   const modal = document.createElement('div');
   modal.className = 'cfgsync-modal';
   modal.style.cssText = `
-    background: #1c202a !important;
-    color: #e6edf3 !important;
+    background: var(--cfgsync-bg) !important;
+    color: var(--cfgsync-text) !important;
     padding: 22px 24px; border-radius: 12px; max-width: 440px; width: 90%;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.1);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.75), 0 0 0 1px color-mix(in srgb, var(--cfgsync-text) 10%, transparent);
+    font-family: inherit;
     box-sizing: border-box;
   `;
 
   modal.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px;">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; border-bottom:1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent); padding-bottom:10px;">
       <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-        <div style="width:34px; height:34px; border-radius:8px; background:rgba(24,144,255,0.15); border:1px solid rgba(24,144,255,0.35); display:flex; align-items:center; justify-content:center; color:#1890ff; flex-shrink:0;">
+        <div style="width:34px; height:34px; border-radius:8px; background:rgba(24,144,255,0.15); border:1px solid rgba(24,144,255,0.35); display:flex; align-items:center; justify-content:center; color:var(--cfgsync-accent); flex-shrink:0;">
           <i class="fa-solid fa-share-nodes" style="font-size:14px;"></i>
         </div>
         <div style="min-width:0; flex:1;">
-          <div style="font-size:15px; font-weight:600; color:#f0f6fc; line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${displayName}">分享：${displayName}</div>
-          <div style="font-size:11.5px; color:#8b949e; line-height:1.3; margin-top:2px;">生成专属分享邀请码或一键设为全服公开</div>
+          <div style="font-size:15px; font-weight:600; color:var(--cfgsync-text); line-height:1.3; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${escapeHtml(displayName)}">分享：${escapeHtml(displayName)}</div>
+          <div style="font-size:11.5px; color:var(--cfgsync-muted); line-height:1.3; margin-top:2px;">生成专属分享邀请码或一键设为全服公开</div>
         </div>
       </div>
-      <button id="cfgsync-share-close-x" type="button" style="width:26px; height:26px; border-radius:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); color:#8b949e; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0; transition:all 0.15s ease;">&times;</button>
+      <button id="cfgsync-share-close-x" type="button" style="width:26px; height:26px; border-radius:6px; background:color-mix(in srgb, var(--cfgsync-text) 6%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 10%, transparent); color:var(--cfgsync-muted); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; padding:0; transition:all 0.15s ease;">&times;</button>
     </div>
 
     ${contentType === 'settings' ? `
     <!-- 家庭共享模式：API Key 密钥注入授权 -->
     <div style="margin-bottom:14px; padding:12px; border-radius:8px; background:rgba(250,173,20,0.1); border:1px solid rgba(250,173,20,0.3);">
-      <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; font-size:12.5px; color:#f0f6fc; font-weight:600;">
-        <input id="cfgsync-inject-secrets-cb" type="checkbox" style="margin-top:2px; cursor:pointer; accent-color:#faad14; width:15px; height:15px;" />
+      <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; font-size:12.5px; color:var(--cfgsync-text); font-weight:600;">
+        <input id="cfgsync-inject-secrets-cb" type="checkbox" style="margin-top:2px; cursor:pointer; accent-color:var(--cfgsync-warning); width:15px; height:15px;" />
         <div>
           <div>同时共享 API Key (让家人免配即可调模型)</div>
-          <div style="font-size:11px; color:#d29922; font-weight:normal; margin-top:3px; line-height:1.4;">
+          <div style="font-size:11px; color:var(--cfgsync-warning); font-weight:normal; margin-top:3px; line-height:1.4;">
             ⚠️ 勾选后，认领方在拉取时会自动将本账号的 API Key 写入其环境，明文不经前端传输；但认领后对方已持有密钥，即使撤销共享也无法追回已落盘的密钥，请仅对信任的家庭成员开启。
           </div>
         </div>
@@ -199,13 +200,13 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
     ` : ''}
 
     <!-- 区块 1: 生成分享码 -->
-    <div style="margin-bottom:16px; padding:14px; border-radius:8px; background:#141720; border:1px solid rgba(255,255,255,0.08);">
-      <div style="font-size:13px; font-weight:600; color:#f0f6fc; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-        <i class="fa-solid fa-ticket" style="color:#58a6ff; font-size:12px;"></i>
+    <div style="margin-bottom:16px; padding:14px; border-radius:8px; background:#141720; border:1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent);">
+      <div style="font-size:13px; font-weight:600; color:var(--cfgsync-text); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <i class="fa-solid fa-ticket" style="color:var(--cfgsync-accent); font-size:12px;"></i>
         <span>专属邀请码</span>
       </div>
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-        <select id="cfgsync-code-type-select" style="flex:1; padding:6px 10px; font-size:12px; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:#1c202a; color:#f0f6fc; outline:none;">
+        <select id="cfgsync-code-type-select" style="flex:1; padding:6px 10px; font-size:12px; border-radius:6px; border:1px solid color-mix(in srgb, var(--cfgsync-text) 15%, transparent); background:var(--cfgsync-bg); color:var(--cfgsync-text); outline:none;">
           <option value="single_use" selected>单次核销 (一人认领后失效)</option>
           <option value="multi_use">多人使用 (不限认领次数)</option>
         </select>
@@ -213,10 +214,10 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
       </div>
       <div id="cfgsync-code-result" style="display:none; margin-top:10px;">
         <div style="display:flex; align-items:center; gap:10px; background:#0d1117; padding:10px 14px; border-radius:6px; border:1px solid rgba(88,166,255,0.35);">
-          <span id="cfgsync-code-display" style="font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:18px; font-weight:700; color:#7ee787; letter-spacing:3px; flex:1; user-select:all;"></span>
-          <button id="cfgsync-copy-code-btn" type="button" style="padding:5px 12px; font-size:11.5px; font-weight:500; border-radius:4px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#f0f6fc; cursor:pointer; transition:all 0.15s ease;">复制</button>
+          <span id="cfgsync-code-display" style="font-family: inherit; font-size:18px; font-weight:700; color:#7ee787; letter-spacing:3px; flex:1; user-select:all;"></span>
+          <button id="cfgsync-copy-code-btn" type="button" style="padding:5px 12px; font-size:11.5px; font-weight:500; border-radius:4px; background:color-mix(in srgb, var(--cfgsync-text) 10%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 20%, transparent); color:var(--cfgsync-text); cursor:pointer; transition:all 0.15s ease;">复制</button>
         </div>
-        <div style="font-size:11px; color:#d29922; margin-top:8px; line-height:1.4; display:flex; align-items:flex-start; gap:6px;">
+        <div style="font-size:11px; color:var(--cfgsync-warning); margin-top:8px; line-height:1.4; display:flex; align-items:flex-start; gap:6px;">
           <i class="fa-solid fa-triangle-exclamation" style="margin-top:2px;"></i>
           <span>提示：对方认领后拉取将下载独立本地副本，已拉取的副本无法追溯收回；若勾选了共享 API Key，密钥将注入其账号目录且撤销授权不会回收。</span>
         </div>
@@ -224,27 +225,27 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
     </div>
 
     <!-- 区块 2: 全服公开只读 -->
-    <div style="margin-bottom:16px; padding:14px; border-radius:8px; background:#141720; border:1px solid rgba(255,255,255,0.08);">
+    <div style="margin-bottom:16px; padding:14px; border-radius:8px; background:#141720; border:1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent);">
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <div>
-          <div style="font-size:13px; font-weight:600; color:#f0f6fc; display:flex; align-items:center; gap:6px;">
+          <div style="font-size:13px; font-weight:600; color:var(--cfgsync-text); display:flex; align-items:center; gap:6px;">
             <i class="fa-solid fa-globe" style="color:#bc8cff; font-size:12px;"></i>
             <span>全服公开只读</span>
           </div>
-          <div style="font-size:11px; color:#8b949e; margin-top:3px;">开启后，本服务实例上的任何账号均可只读拉取此配置</div>
+          <div style="font-size:11px; color:var(--cfgsync-muted); margin-top:3px;">开启后，本服务实例上的任何账号均可只读拉取此配置</div>
         </div>
-        <button id="cfgsync-public-toggle-btn" type="button" style="padding:6px 14px; font-size:12px; font-weight:500; border-radius:6px; cursor:pointer; border:1px solid rgba(255,255,255,0.18); background:rgba(255,255,255,0.08); color:#f0f6fc; transition:all 0.15s ease;">设为公开</button>
+        <button id="cfgsync-public-toggle-btn" type="button" style="padding:6px 14px; font-size:12px; font-weight:500; border-radius:6px; cursor:pointer; border:1px solid color-mix(in srgb, var(--cfgsync-text) 18%, transparent); background:color-mix(in srgb, var(--cfgsync-text) 8%, transparent); color:var(--cfgsync-text); transition:all 0.15s ease;">设为公开</button>
       </div>
       <div id="cfgsync-public-status-msg" style="display:none; font-size:11.5px; margin-top:8px;"></div>
     </div>
 
     <div style="display:flex; justify-content:flex-end;">
-      <button id="cfgsync-share-close-btn" type="button" style="padding:7px 18px; border-radius:6px; font-size:12.5px; font-weight:500; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); color:#c9d1d9; cursor:pointer; transition:all 0.15s ease;">完成</button>
+      <button id="cfgsync-share-close-btn" type="button" style="padding:7px 18px; border-radius:6px; font-size:12.5px; font-weight:500; background:color-mix(in srgb, var(--cfgsync-text) 8%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 15%, transparent); color:var(--cfgsync-text); cursor:pointer; transition:all 0.15s ease;">完成</button>
     </div>
   `;
 
   overlay.appendChild(modal);
-  document.body.appendChild(overlay);
+  mountDialog(overlay);
 
   let hasChanges = false;
   const close = () => {
@@ -296,7 +297,7 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
       genBtn.textContent = '重新生成';
       genBtn.disabled = false;
     } catch (err) {
-      alert(`生成失败: ${err.message}`);
+      notify(`生成失败: ${escapeHtml(err.message)}`);
       genBtn.textContent = '生成邀请码';
       genBtn.disabled = false;
     }
@@ -359,15 +360,15 @@ export function showShareDialog({ api, contentType, itemUid, displayName, onUpda
         publicMsg.innerHTML = '<i class="fa-solid fa-circle-check"></i> 已开启全服公开只读';
       } else {
         publicBtn.textContent = '设为公开';
-        publicBtn.style.background = 'rgba(255,255,255,0.08)';
-        publicBtn.style.borderColor = 'rgba(255,255,255,0.18)';
-        publicBtn.style.color = '#f0f6fc';
+        publicBtn.style.background = 'color-mix(in srgb, var(--cfgsync-text) 8%, transparent)';
+        publicBtn.style.borderColor = 'color-mix(in srgb, var(--cfgsync-text) 18%, transparent)';
+        publicBtn.style.color = 'var(--cfgsync-text)';
         publicMsg.style.display = 'block';
-        publicMsg.style.color = '#8b949e';
+        publicMsg.style.color = 'var(--cfgsync-muted)';
         publicMsg.innerHTML = '<i class="fa-solid fa-circle-info"></i> 已取消全服公开';
       }
     } catch (err) {
-      alert(`设置失败: ${err.message}`);
+      notify(`设置失败: ${escapeHtml(err.message)}`);
     } finally {
       publicBtn.disabled = false;
     }

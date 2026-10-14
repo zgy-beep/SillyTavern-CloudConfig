@@ -1,6 +1,8 @@
 import { OperationType, Permission, DEFAULT_MAX_VERSIONS } from '../../common/constants.js';
 import { calcJsonChecksum, sha256 } from '../../common/utils.js';
 import { DiskGuard, InsufficientStorageError } from '../utils/DiskGuard.js';
+import { validateSegment } from '../utils/SafePaths.js';
+import { SnapshotCommitter } from '../storage/SnapshotCommitter.js';
 
 export { InsufficientStorageError };
 
@@ -62,6 +64,8 @@ export class SyncService {
     this.configService = configService;
     this.maxVersions = maxVersions;
     this.storageMirror = storageMirror;
+    this.committer = new SnapshotCommitter(snapshotStore);
+    this.mirrorJobs = new Set();
     this.mockAvailableBytes = null; // 供测试注入模拟可用字节数
 
     this.prepareStatements();
@@ -87,7 +91,7 @@ export class SyncService {
 
     this.stmtCasUpdate = this.db.prepare(`
       UPDATE config_records
-      SET current_version = current_version + 1,
+      SET current_version = :nextVersion,
           display_name = COALESCE(:displayName, display_name),
           current_checksum = :checksum,
           mime_type = :mimeType,
@@ -225,7 +229,10 @@ export class SyncService {
     checksum = null,
     payload = null,
     clientId = 'unknown',
+    skipUnchanged = false,
   }) {
+    validateSegment(itemUid, 'item_uid');
+    if (!Object.values(OperationType).includes(operation)) throw new BadRequestError('Invalid operation');
     // 1. 权限校验：写操作仅限所有者
     if (!this.auth.can(Permission.WRITE, authContext.handle, ownerHandle, contentType, itemUid)) {
       throw new ForbiddenError(`User '${authContext.handle}' has no write permission on '${ownerHandle}/${contentType}/${itemUid}'`);
@@ -260,6 +267,9 @@ export class SyncService {
 
     // 2. 数据校验与序列化
     if (operation === OperationType.UPSERT) {
+      const requestedExclusion = excludeHeavy !== null && excludeHeavy !== undefined ? excludeHeavy : exclude_heavy;
+      const snapshotOptions = { excludeHeavy: requestedExclusion !== null && requestedExclusion !== undefined
+        ? Boolean(requestedExclusion) : this.configService?.get('excludeHeavyExtensions') !== false };
       // 若客户端未提供 payload，则由适配器从本地真实文件读取
       if (payload === null || payload === undefined || (typeof payload === 'object' && Object.keys(payload).length === 0)) {
         // D-1 优先级：按次入参 > 全局 ConfigService > 默认 true
@@ -282,6 +292,7 @@ export class SyncService {
       if (!adapter.validate(payload)) {
         throw new BadRequestError(`Invalid payload for content_type: ${contentType}`);
       }
+      if (adapter.prepareSnapshot) payload = adapter.prepareSnapshot(payload, snapshotOptions);
       serialized = adapter.serialize(payload);
       actualChecksum = sha256(adapter.canonicalize(payload));
     }
@@ -298,41 +309,27 @@ export class SyncService {
       ? Boolean(force)
       : Boolean(this.configService?.get('forcePush'));
 
-    // 获取当前云端记录
+    if (!isForce && (!Number.isSafeInteger(baseVersion) || baseVersion < 0)) {
+      throw new BadRequestError('base_version must be a non-negative integer');
+    }
+
+    // Version allocation is repeated inside the transaction after file staging.
     let currentRecord = this.stmtGetRecord.get({
       ':owner': ownerHandle,
       ':ct': contentType,
       ':uid': itemUid,
     });
 
-    if (!currentRecord) {
-      this.stmtInitRecord.run({
-        ':owner': ownerHandle,
-        ':ct': contentType,
-        ':uid': itemUid,
-        ':displayName': displayName || `item_${itemUid.slice(0, 8)}`,
-        ':mimeType': serialized ? serialized.mimeType : null,
-        ':ext': serialized ? serialized.ext : null,
-        ':now': now,
-        ':clientId': clientId,
-      });
-      currentRecord = this.stmtGetRecord.get({
-        ':owner': ownerHandle,
-        ':ct': contentType,
-        ':uid': itemUid,
-      });
-    }
-
     // 计算预期版本号
-    const nextVersion = isForce
+    let nextVersion = isForce
       ? (currentRecord ? currentRecord.current_version : 0) + 1
       : (baseVersion !== undefined ? baseVersion + 1 : (currentRecord ? currentRecord.current_version : 0) + 1);
 
-    let tempBlobInfo = null;
+    let blobPath = null;
 
     // 写入临时 Blob 并落盘（DELETE 操作跳过）
     if (operation === OperationType.UPSERT && serialized) {
-      tempBlobInfo = await this.store.prepareTempBlob(
+      blobPath = await this.committer.stage(
         authContext.directories,
         contentType,
         itemUid,
@@ -346,8 +343,32 @@ export class SyncService {
     let txSuccess = false;
     let committedVersion = 0;
     let committedSeq = null;
+    let unchanged = false;
     try {
       this.db.transaction(() => {
+        currentRecord = this.stmtGetRecord.get({ ':owner': ownerHandle, ':ct': contentType, ':uid': itemUid });
+        const serverVersion = currentRecord?.current_version || 0;
+        if (!isForce && serverVersion !== baseVersion) {
+          throw new ConflictError('Cloud version changed; review the latest snapshot before uploading',
+            serverVersion, currentRecord?.current_checksum, Boolean(currentRecord?.is_deleted));
+        }
+        if (skipUnchanged && operation === OperationType.UPSERT && currentRecord && !currentRecord.is_deleted
+          && currentRecord.current_checksum === actualChecksum) {
+          unchanged = true;
+          committedVersion = serverVersion;
+          return;
+        }
+        if (!currentRecord) {
+          this.stmtInitRecord.run({
+            ':owner': ownerHandle, ':ct': contentType, ':uid': itemUid,
+            ':displayName': displayName || `item_${itemUid.slice(0, 8)}`,
+            ':mimeType': serialized?.mimeType || null, ':ext': serialized?.ext || null,
+            ':now': now, ':clientId': clientId,
+          });
+        }
+        const sequence = this.db.prepare('SELECT last_version FROM version_sequences WHERE owner_handle=? AND content_type=? AND item_uid=?').get(ownerHandle, contentType, itemUid);
+        nextVersion = Math.max(serverVersion, sequence?.last_version || 0) + 1;
+        this.db.prepare('INSERT INTO version_sequences (owner_handle,content_type,item_uid,last_version) VALUES (?,?,?,?) ON CONFLICT(owner_handle,content_type,item_uid) DO UPDATE SET last_version=excluded.last_version').run(ownerHandle,contentType,itemUid,nextVersion);
         if (isForce) {
           // 直推模式：直接覆盖递增版本，墓碑自动复活 (is_deleted = 0)
           this.stmtDirectUpdate.run({
@@ -377,6 +398,7 @@ export class SyncService {
             ':ct': contentType,
             ':uid': itemUid,
             ':baseVersion': baseVersion,
+            ':nextVersion': nextVersion,
           });
 
           // CAS 竞争失败（受影响行数为 0）
@@ -410,7 +432,7 @@ export class SyncService {
           ':checksum': actualChecksum,
           ':mimeType': serialized ? serialized.mimeType : null,
           ':ext': serialized ? serialized.ext : null,
-          ':blobPath': tempBlobInfo ? tempBlobInfo.targetPath : null,
+          ':blobPath': blobPath,
           ':versionTitle': cleanTitle,
           ':sizeBytes': sizeBytes,
           ':now': now,
@@ -429,24 +451,17 @@ export class SyncService {
         committedSeq = eventRes.lastInsertRowid;
       });
 
-      // 事务提交后，原子重命名临时 blob 为正式 blob
-      if (tempBlobInfo) {
-        await this.store.commitBlob(tempBlobInfo.tmpPath, tempBlobInfo.targetPath);
-        // N-3, #9, #18: 异步镜像至 LocalPath 与 WebDAV 外部驱动
-        if (this.storageMirror && serialized?.buffer) {
-          const relPath = `blobs/${ownerHandle}/${contentType}/${itemUid}/v${committedVersion}.${serialized.ext || 'bin'}`;
-          this.storageMirror.mirrorBlob(relPath, serialized.buffer).catch(err => {
-            console.warn('[cfgsync:mirror] Background mirror warning:', err.message);
-          });
-        }
-      }
-
       txSuccess = true;
     } finally {
-      // 若事务失败，清理未提交的临时 blob
-      if (!txSuccess && tempBlobInfo) {
-        await this.store.deleteBlob(tempBlobInfo.tmpPath);
-      }
+      if ((!txSuccess || unchanged) && blobPath) await this.committer.discard([blobPath]);
+    }
+
+    if (!unchanged && this.storageMirror && serialized?.buffer) {
+      const relPath = `blobs/${ownerHandle}/${contentType}/${itemUid}/v${committedVersion}.${serialized.ext || 'bin'}`;
+      const job = this.storageMirror.mirrorBlob(relPath, serialized.buffer)
+        .catch(err => console.warn('[cfgsync:mirror]', err.message));
+      this.mirrorJobs.add(job);
+      job.finally(() => this.mirrorJobs.delete(job));
     }
 
     // 触发历史版本修剪
@@ -462,8 +477,11 @@ export class SyncService {
       version_title: cleanTitle,
       size_bytes: sizeBytes,
       seq: committedSeq,
+      unchanged,
     };
   }
+
+  async waitForMirrors() { await Promise.all([...this.mirrorJobs]); }
 
   /**
    * 拉取指定对象内容
@@ -583,6 +601,7 @@ export class SyncService {
       operation: OperationType.UPSERT,
       payload,
       clientId: clientId || 'rollback_client',
+      force: false,
     });
   }
 
@@ -633,16 +652,22 @@ export class SyncService {
       }
     }
 
-    for (const v of toPrune) {
-      if (v.blob_path) {
-        await this.store.deleteBlob(v.blob_path).catch(() => {});
-      }
+    const deletedPaths = [];
+    this.db.transaction(() => { for (const v of toPrune) {
+      const latest = this.stmtGetRecord.get({ ':owner': ownerHandle, ':ct': contentType, ':uid': itemUid });
+      const live = this.stmtGetVersion.get({ ':owner': ownerHandle, ':ct': contentType, ':uid': itemUid, ':version': v.version });
+      if (!live || live.is_locked || latest?.current_version === v.version) continue;
       this.stmtDeleteVersionRow.run({
         ':owner': ownerHandle,
         ':ct': contentType,
         ':uid': itemUid,
         ':version': v.version,
       });
+      if (v.blob_path) deletedPaths.push(v.blob_path);
+    }});
+    for (const blobPath of deletedPaths) {
+      const refs = this.db.prepare('SELECT COUNT(*) AS count FROM config_versions WHERE blob_path=?').get(blobPath);
+      if (!refs.count) await this.store.deleteBlob(blobPath).catch(() => {});
     }
   }
 
@@ -683,7 +708,7 @@ export class SyncService {
     }
 
     const row = this.db.prepare(`
-      SELECT version, blob_path FROM config_versions
+      SELECT version, blob_path, is_locked FROM config_versions
       WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid AND version = :version
     `).get({
       ':owner': ownerHandle,
@@ -694,9 +719,8 @@ export class SyncService {
 
     if (!row) return false;
 
-    if (row.blob_path) {
-      await this.store.deleteBlob(row.blob_path).catch(() => {});
-    }
+    if (row.is_locked) { const error = new Error('Unlock this snapshot before deleting it'); error.status = 423; throw error; }
+    this.db.transaction(() => {
 
     this.stmtDeleteVersionRow.run({
       ':owner': ownerHandle,
@@ -716,11 +740,12 @@ export class SyncService {
       const highest = remaining[0];
       this.db.prepare(`
         UPDATE config_records
-        SET current_version = :ver, current_checksum = :chk, updated_at = :now
+        SET current_version = :ver, current_checksum = :chk, is_deleted = :deleted, updated_at = :now
         WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid
       `).run({
         ':ver': highest.version,
         ':chk': highest.checksum,
+        ':deleted': highest.operation === 'DELETE' ? 1 : 0,
         ':now': Date.now(),
         ':owner': ownerHandle,
         ':ct': contentType,
@@ -740,6 +765,10 @@ export class SyncService {
       });
     }
 
+    });
+    if (row.blob_path && !this.db.prepare('SELECT COUNT(*) AS n FROM config_versions WHERE blob_path=?').get(row.blob_path).n) {
+      await this.store.deleteBlob(row.blob_path).catch(() => {});
+    }
     return true;
   }
 
@@ -985,6 +1014,7 @@ export class SyncService {
     const stmtDeleteVersion = this.db.prepare(`
       DELETE FROM config_versions
       WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid AND version = :version AND is_locked = 0
+        AND EXISTS (SELECT 1 FROM config_records r WHERE r.owner_handle=:owner AND r.content_type=:ct AND r.item_uid=:uid AND r.is_deleted=1)
     `);
 
     const stmtCountOtherRefs = this.db.prepare(`
@@ -993,6 +1023,12 @@ export class SyncService {
 
     for (const cand of candidates) {
       if (cand.is_locked === 1) continue;
+
+      const res = stmtDeleteVersion.run({
+        ':owner': cand.owner_handle, ':ct': cand.content_type, ':uid': cand.item_uid, ':version': cand.version,
+      });
+      if (!res.changes) continue;
+      deletedCount++;
 
       if (cand.blob_path) {
         const refRow = stmtCountOtherRefs.get({
@@ -1012,15 +1048,6 @@ export class SyncService {
         }
       }
 
-      const res = stmtDeleteVersion.run({
-        ':owner': cand.owner_handle,
-        ':ct': cand.content_type,
-        ':uid': cand.item_uid,
-        ':version': cand.version,
-      });
-      if (res.changes > 0) {
-        deletedCount++;
-      }
     }
 
     return {

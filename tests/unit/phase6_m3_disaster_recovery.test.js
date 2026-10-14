@@ -1,3 +1,4 @@
+import { calcJsonChecksum } from '../../src/common/utils.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -177,7 +178,7 @@ test('Phase 6 Milestone 3: 容灾备份、外部驱动镜像与断电自愈调�
     assert.ok(pushRes.checksum);
 
     // 等待后台异步镜像落地
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await sync.waitForMirrors();
     const mirrored = await localDriver.read(`blobs/test_disk_user/settings/settings/v1.json`);
     assert.ok(mirrored);
     const parsed = JSON.parse(mirrored.toString('utf8'));
@@ -222,13 +223,17 @@ test('Phase 6 Milestone 3: 容灾备份、外部驱动镜像与断电自愈调�
     const manifestEntry = entries.find(e => e.name === 'manifest.json');
     const manifest = JSON.parse(manifestEntry.data.toString('utf8'));
     // 修改 checksum
-    manifest.records[0].current_checksum = 'diff_checksum_12345';
+    const importedContent = { test: 456 };
+    const checksum = calcJsonChecksum(importedContent);
+    manifest.records[0].current_checksum = checksum;
+    manifest.versions[0].checksum = checksum;
+    entries.find(e => e.name === manifest.versions[0].blob_entry_name).data = Buffer.from(JSON.stringify(importedContent));
     manifestEntry.data = Buffer.from(JSON.stringify(manifest, null, 2), 'utf8');
 
     const modifiedZip = DeterministicZip.pack(entries);
 
     // 执行导入：#8 铁律绝不静默覆盖现有数据，而是作为递增新版本入库，保留回滚点
-    const importRes2 = await drService.importBackup(modifiedZip, 'test_disk_user');
+    const importRes2 = await drService.importBackup(modifiedZip, 'test_disk_user', { user: path.join(tempBase, 'data', 'test_disk_user') });
     assert.strictEqual(importRes2.success, true);
     assert.strictEqual(importRes2.conflictCount, 1);
     assert.strictEqual(importRes2.details[0].status, 'conflict_resolved_as_new_version');
@@ -237,7 +242,10 @@ test('Phase 6 Milestone 3: 容灾备份、外部驱动镜像与断电自愈调�
     // 验证数据库记录现版本升级为 2，并且两版记录都在
     const rec = dbClient.prepare("SELECT * FROM config_records WHERE owner_handle = 'test_disk_user' AND content_type = 'settings'").get();
     assert.strictEqual(rec.current_version, 2);
-    assert.strictEqual(rec.current_checksum, 'diff_checksum_12345');
+    assert.strictEqual(rec.current_checksum, checksum);
+    const restored = await drService.exportBackup('test_disk_user');
+    const restoredManifest = JSON.parse(DeterministicZip.unpack(restored.buffer).find(e => e.name === 'manifest.json').data);
+    assert.strictEqual(restoredManifest.versions.length, 2);
   });
 
   await t.test('7. SchedulerService: 断电自愈补跑 (Power-off Catch-up Execution) (#11)', async () => {

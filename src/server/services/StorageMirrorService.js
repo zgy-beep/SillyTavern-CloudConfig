@@ -15,6 +15,8 @@ export class StorageMirrorService {
    */
   constructor({ configService, localDriver = null, webdavDriver = null } = {}) {
     this.configService = configService;
+    this.customLocalDriver = Boolean(localDriver);
+    this.customWebdavDriver = Boolean(webdavDriver);
     this.localDriver = localDriver || new LocalPathStorageDriver({
       basePath: configService?.get('localPath') || '',
       enabled: Boolean(configService?.get('localPathEnabled')),
@@ -29,11 +31,11 @@ export class StorageMirrorService {
 
   refreshConfig() {
     if (!this.configService) return;
-    this.localDriver.updateConfig({
+    if (!this.customLocalDriver) this.localDriver.updateConfig({
       basePath: this.configService.get('localPath') || '',
       enabled: Boolean(this.configService.get('localPathEnabled')),
     });
-    this.webdavDriver.updateConfig({
+    if (!this.customWebdavDriver) this.webdavDriver.updateConfig({
       url: this.configService.get('webdavUrl') || '',
       username: this.configService.get('webdavUsername') || '',
       password: this.configService.get('webdavPassword') || '',

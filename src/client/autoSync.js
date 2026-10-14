@@ -217,7 +217,8 @@ export class AutoSyncEngine {
         }
 
         // 仅对当前所有者资产执行推送 (OWN 模式)
-        if (binding.sync_mode === SyncMode.OWN || !binding.sync_mode) {
+        if ((!binding.source_owner_handle || binding.source_owner_handle === handle)
+          && (binding.sync_mode === SyncMode.OWN || !binding.sync_mode)) {
           // 若之前已处于冲突状态，不重复推送，等待用户处理
           if (binding.state === SyncState.CONFLICT) {
             conflicts++;
@@ -229,12 +230,13 @@ export class AutoSyncEngine {
             const pushRes = await this.syncManager.pushLocal(binding, null, {
               versionTitle: '自动同步安全快照',
               force: false,
+              skipUnchanged: true,
             });
 
             if (pushRes?.conflict) {
               conflicts++;
               this.notifyFn(`资产「${binding.display_name}」检测到云端更新，自动同步已暂停并标记冲突，请在面板中确认。`);
-            } else if (pushRes?.success) {
+            } else if (pushRes?.success && !pushRes.unchanged) {
               pushed++;
             }
           } catch (err) {

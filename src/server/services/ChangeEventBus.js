@@ -113,11 +113,13 @@ export class ChangeEventBus {
     const dedupedEvents = Array.from(dedupMap.values());
     // 按 seq 升序返回，并限制 limit
     dedupedEvents.sort((a, b) => a.seq - b.seq);
-    const sliced = dedupedEvents.slice(0, limit);
+    const pageSize = Math.max(1, Math.min(1000, Math.floor(Number(limit)) || 100));
+    const sliced = dedupedEvents.slice(0, pageSize);
 
     return {
       events: sliced,
-      latest_seq: maxSeenSeq,
+      latest_seq: sliced.length ? sliced[sliced.length - 1].seq : Number(sinceSeq) || 0,
+      has_more: dedupedEvents.length > sliced.length,
     };
   }
 }

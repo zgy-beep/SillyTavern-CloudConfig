@@ -4,7 +4,9 @@
   "description": "SillyTavern 多用户多设备配置云同步与共享插件",
   "main": "index.js",
   "type": "module",
+  "engines": { "node": ">=24" },
   "scripts": {
+    "preview": "node scripts/preview-ui.mjs",
     "test": "node --test tests/unit/*.test.js tests/integration/*.test.js"
   },
   "repository": {

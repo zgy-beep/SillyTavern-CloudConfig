@@ -1,6 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DeterministicZip } from '../utils/DeterministicZip.js';
+import { SnapshotCommitter } from '../storage/SnapshotCommitter.js';
+import { validateSegment } from '../utils/SafePaths.js';
+import { sha256 } from '../../common/utils.js';
+import { createP0Adapters } from '../adapters/P0Adapters.js';
+import { createP1Adapters } from '../adapters/P1Adapters.js';
+import { createP2Adapters } from '../adapters/P2Adapters.js';
 
 /**
  * 灾备导出与无损安全导入服务 (#7, #8)
@@ -15,10 +21,12 @@ export class DisasterRecoveryService {
    * @param {import('../storage/SnapshotStore.js').SnapshotStore} options.snapshotStore
    * @param {import('./AuditService.js').AuditService} [options.auditService]
    */
-  constructor({ dbClient, snapshotStore, auditService = null }) {
+  constructor({ dbClient, snapshotStore, auditService = null, adapters = null }) {
     this.db = dbClient;
     this.store = snapshotStore;
     this.audit = auditService;
+    this.committer = new SnapshotCommitter(snapshotStore);
+    this.adapters = adapters || new Map([...createP0Adapters(), ...createP1Adapters(), ...createP2Adapters()]);
   }
 
   /**
@@ -28,8 +36,8 @@ export class DisasterRecoveryService {
    */
   async exportBackup(ownerHandle = null) {
     const records = ownerHandle
-      ? this.db.prepare('SELECT * FROM config_records WHERE owner_handle = :owner AND is_deleted = 0').all({ ':owner': ownerHandle })
-      : this.db.prepare('SELECT * FROM config_records WHERE is_deleted = 0').all();
+      ? this.db.prepare('SELECT * FROM config_records WHERE owner_handle = :owner').all({ ':owner': ownerHandle })
+      : this.db.prepare('SELECT * FROM config_records').all();
 
     const versions = ownerHandle
       ? this.db.prepare('SELECT * FROM config_versions WHERE owner_handle = :owner').all({ ':owner': ownerHandle })
@@ -86,7 +94,7 @@ export class DisasterRecoveryService {
             data: blobData,
           });
         } catch (readErr) {
-          console.warn(`[cfgsync:export] Warning: missing blob at ${v.blob_path}:`, readErr.message);
+          throw new Error(`Backup incomplete: cannot read ${v.content_type}/${v.item_uid} version ${v.version}: ${readErr.message}`);
         }
       }
     }
@@ -121,189 +129,119 @@ export class DisasterRecoveryService {
    * @returns {Promise<{ success: boolean, importedRecords: number, importedVersions: number, conflictCount: number, details: Array<any> }>}
    */
   async importBackup(zipBuffer, requesterHandle, directories = null) {
+    const fail = (message, status = 400) => { const error = new Error(message); error.status = status; throw error; };
+    if (!requesterHandle) fail('An authenticated account is required');
     const entries = DeterministicZip.unpack(zipBuffer);
-    const manifestEntry = entries.find(e => e.name === 'manifest.json');
-    if (!manifestEntry) {
-      throw new Error('Invalid backup archive: manifest.json not found');
-    }
-
+    if (new Set(entries.map(e => e.name)).size !== entries.length) fail('Duplicate ZIP entries');
+    const entryMap = new Map(entries.map(e => [e.name, e.data]));
     let manifest;
-    try {
-      manifest = JSON.parse(manifestEntry.data.toString('utf8'));
-    } catch (err) {
-      throw new Error(`Failed to parse manifest.json: ${err.message}`);
-    }
+    try { manifest = JSON.parse(entryMap.get('manifest.json')?.toString('utf8')); }
+    catch { fail('Invalid backup manifest'); }
+    if (manifest?.version !== 1 || !Array.isArray(manifest.records) || !Array.isArray(manifest.versions)) fail('Unsupported backup format');
+    if (manifest.records.length > 10000 || manifest.versions.length > 50000) fail('Backup contains too many records');
 
-    const blobMap = new Map();
-    for (const e of entries) {
-      if (e.name.startsWith('blobs/')) {
-        blobMap.set(e.name, e.data);
-      }
+    const recordKey = r => JSON.stringify([r.owner_handle, r.content_type, r.item_uid]);
+    const destinationKey = r => JSON.stringify([r.content_type, r.item_uid]);
+    const seen = new Set();
+    const versionsByRecord = new Map();
+    for (const v of manifest.versions) {
+      validateSegment(v.content_type, 'content_type'); validateSegment(v.item_uid, 'item_uid');
+      validateSegment(v.ext || 'bin', 'extension');
+      if (!Number.isSafeInteger(v.version) || v.version < 1 || !['UPSERT', 'DELETE'].includes(v.operation)) fail('Invalid archive version');
+      const key = recordKey(v);
+      const list = versionsByRecord.get(key) || [];
+      if (list.some(row => row.version === v.version)) fail('Duplicate archive version');
+      list.push(v); versionsByRecord.set(key, list);
     }
-
-    let importedRecords = 0;
+    const plans = [];
+    const staged = [];
     let importedVersions = 0;
+    let importedRecords = 0;
     let conflictCount = 0;
     const details = [];
-
-    const stmtGetRec = this.db.prepare(`
-      SELECT * FROM config_records
-      WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid
-    `);
-
-    const stmtInsertRec = this.db.prepare(`
-      INSERT INTO config_records (
-        owner_handle, content_type, item_uid, display_name, current_version,
-        current_checksum, mime_type, ext, is_deleted, updated_at, updated_by_client
-      ) VALUES (
-        :owner, :ct, :uid, :displayName, :currentVersion,
-        :currentChecksum, :mimeType, :ext, :isDeleted, :updatedAt, :clientId
-      )
-    `);
-
-    const stmtUpdateRec = this.db.prepare(`
-      UPDATE config_records
-      SET current_version = :currentVersion,
-          current_checksum = :currentChecksum,
-          mime_type = :mimeType,
-          ext = :ext,
-          is_deleted = :isDeleted,
-          updated_at = :updatedAt
-      WHERE owner_handle = :owner AND content_type = :ct AND item_uid = :uid
-    `);
-
-    const stmtInsertVersion = this.db.prepare(`
-      INSERT INTO config_versions (
-        owner_handle, content_type, item_uid, version, operation,
-        checksum, mime_type, ext, blob_path, version_title, size_bytes,
-        is_locked, created_at, created_by_client
-      ) VALUES (
-        :owner, :ct, :uid, :version, :op,
-        :checksum, :mimeType, :ext, :blobPath, :versionTitle, :sizeBytes,
-        :isLocked, :createdAt, :clientId
-      )
-      ON CONFLICT(owner_handle, content_type, item_uid, version) DO NOTHING
-    `);
-
-    this.db.transaction(() => {
-      for (const rec of manifest.records || []) {
-        const owner = requesterHandle || rec.owner_handle;
-        const existing = stmtGetRec.get({
-          ':owner': owner,
-          ':ct': rec.content_type,
-          ':uid': rec.item_uid,
-        });
-
-        if (!existing) {
-          // 本地无记录，全新无冲突写入
-          stmtInsertRec.run({
-            ':owner': owner,
-            ':ct': rec.content_type,
-            ':uid': rec.item_uid,
-            ':displayName': rec.display_name,
-            ':currentVersion': rec.current_version,
-            ':currentChecksum': rec.current_checksum,
-            ':mimeType': rec.mime_type,
-            ':ext': rec.ext,
-            ':isDeleted': rec.is_deleted,
-            ':updatedAt': Date.now(),
-            ':clientId': 'disaster_recovery_import',
-          });
-          importedRecords++;
-          details.push({ itemUid: rec.item_uid, status: 'created' });
-        } else {
-          // 本地已有该记录：检查 Checksum 差异
-          const isIdentical = existing.current_checksum === rec.current_checksum;
-          if (isIdentical) {
-            // 内容完全一致，幂等保留
-            details.push({ itemUid: rec.item_uid, status: 'identical' });
-          } else {
-            // 内容不一致：#8 绝不静默覆盖！
-            // 递增版本号作为导入快照落盘，保留本地旧快照随时可通过 /versions 回滚
-            conflictCount++;
-            const newVersion = Math.max(existing.current_version, rec.current_version) + 1;
-            stmtUpdateRec.run({
-              ':owner': owner,
-              ':ct': rec.content_type,
-              ':uid': rec.item_uid,
-              ':currentVersion': newVersion,
-              ':currentChecksum': rec.current_checksum,
-              ':mimeType': rec.mime_type,
-              ':ext': rec.ext,
-              ':isDeleted': rec.is_deleted,
-              ':updatedAt': Date.now(),
-            });
-            importedRecords++;
-            details.push({ itemUid: rec.item_uid, status: 'conflict_resolved_as_new_version', newVersion });
+    try {
+      // Validate every object and stage every file before changing any metadata.
+      for (const rec of manifest.records) {
+        validateSegment(rec.content_type, 'content_type'); validateSegment(rec.item_uid, 'item_uid');
+        const adapter = this.adapters.get(rec.content_type);
+        if (!adapter) fail('Unsupported archive content type: ' + rec.content_type);
+        if (seen.has(destinationKey(rec))) fail('Archive maps multiple source accounts to the same object; export one account at a time');
+        seen.add(destinationKey(rec));
+        const incoming = (versionsByRecord.get(recordKey(rec)) || []).sort((a,b) => a.version - b.version);
+        const head = incoming.find(v => v.version === rec.current_version);
+        if (!head) fail('Archive current version is missing');
+        if (Boolean(rec.is_deleted) !== (head.operation === 'DELETE')) fail('Archive deletion metadata is inconsistent');
+        for (const v of incoming) {
+          if (v.operation === 'DELETE') continue;
+          const bytes = entryMap.get(v.blob_entry_name);
+          if (!bytes) fail('Archive snapshot file is missing');
+          let content;
+          try { content = adapter.deserialize(bytes, v.mime_type); } catch { fail('Invalid archive snapshot content'); }
+          if (!adapter.validate(content) || sha256(adapter.canonicalize(content)) !== v.checksum) fail('Archive snapshot checksum mismatch');
+        }
+        if (rec.current_checksum !== head.checksum) fail('Archive current checksum is inconsistent');
+        const existing = this.db.prepare('SELECT * FROM config_records WHERE owner_handle=? AND content_type=? AND item_uid=?').get(requesterHandle, rec.content_type, rec.item_uid);
+        const history = this.db.prepare('SELECT * FROM config_versions WHERE owner_handle=? AND content_type=? AND item_uid=? ORDER BY version').all(requesterHandle, rec.content_type, rec.item_uid);
+        const sequence = this.db.prepare('SELECT last_version FROM version_sequences WHERE owner_handle=? AND content_type=? AND item_uid=?').get(requesterHandle, rec.content_type, rec.item_uid);
+        let next = Math.max(existing?.current_version || 0, sequence?.last_version || 0, ...history.map(v => v.version), 0);
+        const mapped = new Map();
+        const additions = [];
+        const sourceKey = v => JSON.stringify([v.owner_handle, v.version, v.operation, v.checksum]);
+        for (const v of incoming) {
+          const receipt = this.db.prepare('SELECT mapped_version FROM import_mappings WHERE owner_handle=? AND content_type=? AND item_uid=? AND source_key=?').get(requesterHandle,rec.content_type,rec.item_uid,sourceKey(v));
+          const same = history.find(h => h.version === (receipt?.mapped_version || v.version) && h.operation === v.operation && h.checksum === v.checksum);
+          if (same) { mapped.set(v.version, same); continue; }
+          const number = existing ? ++next : v.version;
+          let blobPath = null;
+          if (v.operation === 'UPSERT') {
+            if (!directories) fail('Account directories are required to import new snapshots');
+            blobPath = await this.committer.stage(directories, rec.content_type, rec.item_uid, number, v.ext || 'bin', entryMap.get(v.blob_entry_name));
+            staged.push(blobPath);
           }
+          const added = { ...v, version: number, blob_path: blobPath, size_bytes: v.operation === 'DELETE' ? 0 : entryMap.get(v.blob_entry_name).length };
+          mapped.set(v.version, added); additions.push(added);
         }
+        let target = mapped.get(rec.current_version);
+        const identical = existing && existing.current_checksum === rec.current_checksum && Boolean(existing.is_deleted) === Boolean(rec.is_deleted);
+        if (!additions.length && identical) { details.push({ itemUid: rec.item_uid, status: 'identical' }); continue; }
+        // The published head must be newer than every imported historical version.
+        if (existing && target.version < Math.max(next, ...additions.map(v => v.version))) {
+          target = { ...target, version: ++next };
+          additions.push(target);
+          mapped.set(rec.current_version, target);
+        }
+        const conflict = existing && !identical;
+        if (conflict) conflictCount++;
+        plans.push({ rec, existing, additions, target, mappings: incoming.map(v => ({ sourceKey: sourceKey(v), version: mapped.get(v.version).version })) });
+        details.push({ itemUid: rec.item_uid, status: existing ? (conflict ? 'conflict_resolved_as_new_version' : 'history_imported') : 'created', newVersion: target.version });
       }
-
-      // 导入版本历史与元数据
-      for (const ver of manifest.versions || []) {
-        const owner = requesterHandle || ver.owner_handle;
-        let blobPathOnDisk = null;
-
-        if (ver.blob_entry_name && blobMap.has(ver.blob_entry_name) && directories) {
-          const blobBuf = blobMap.get(ver.blob_entry_name);
-          const dir = this.store.getItemDir(directories, ver.content_type, ver.item_uid);
-          // 写入本地 Blob 文件
-          const filename = `v${ver.version}.${ver.ext || 'bin'}`;
-          blobPathOnDisk = path.join(dir, filename);
-          // 在事务后由 fs 异步写入或同步确保目录存在
+      this.db.transaction(() => {
+        for (const plan of plans) {
+          const { rec, existing, additions, target } = plan;
+          const live = this.db.prepare('SELECT current_version,current_checksum,is_deleted FROM config_records WHERE owner_handle=? AND content_type=? AND item_uid=?').get(requesterHandle, rec.content_type, rec.item_uid);
+          if (Boolean(live) !== Boolean(existing) || (live && (live.current_version !== existing.current_version || live.current_checksum !== existing.current_checksum || live.is_deleted !== existing.is_deleted))) fail('Configuration changed during import; retry with the latest state', 409);
+          for (const v of additions) {
+            this.db.prepare('INSERT INTO config_versions (owner_handle,content_type,item_uid,version,operation,checksum,mime_type,ext,blob_path,version_title,size_bytes,is_locked,created_at,created_by_client) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
+              requesterHandle, rec.content_type, rec.item_uid, v.version, v.operation, v.checksum || null,
+              v.mime_type || null, v.ext || null, v.blob_path || null, String(v.version_title || '灾备导入快照').slice(0,64),
+              v.size_bytes || 0, v.is_locked ? 1 : 0, Date.now(), 'disaster_recovery_import');
+            importedVersions++;
+          }
+          const lastVersion = Math.max(target.version, ...additions.map(v => v.version));
+          this.db.prepare('INSERT INTO version_sequences (owner_handle,content_type,item_uid,last_version) VALUES (?,?,?,?) ON CONFLICT(owner_handle,content_type,item_uid) DO UPDATE SET last_version=MAX(last_version,excluded.last_version)').run(requesterHandle,rec.content_type,rec.item_uid,lastVersion);
+          for (const mapping of plan.mappings) this.db.prepare('INSERT INTO import_mappings (owner_handle,content_type,item_uid,source_key,mapped_version) VALUES (?,?,?,?,?) ON CONFLICT(owner_handle,content_type,item_uid,source_key) DO UPDATE SET mapped_version=excluded.mapped_version').run(requesterHandle,rec.content_type,rec.item_uid,mapping.sourceKey,mapping.version);
+          this.db.prepare('INSERT INTO config_records (owner_handle,content_type,item_uid,display_name,current_version,current_checksum,mime_type,ext,is_deleted,updated_at,updated_by_client) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(owner_handle,content_type,item_uid) DO UPDATE SET display_name=excluded.display_name,current_version=excluded.current_version,current_checksum=excluded.current_checksum,mime_type=excluded.mime_type,ext=excluded.ext,is_deleted=excluded.is_deleted,updated_at=excluded.updated_at,updated_by_client=excluded.updated_by_client').run(
+            requesterHandle,rec.content_type,rec.item_uid,String(rec.display_name || rec.item_uid),target.version,target.checksum || null,
+            target.mime_type || null,target.ext || null,target.operation === 'DELETE' ? 1 : 0,Date.now(),'disaster_recovery_import');
+          this.db.prepare('INSERT INTO change_events (owner_handle,content_type,item_uid,version,operation,created_at) VALUES (?,?,?,?,?,?)').run(requesterHandle,rec.content_type,rec.item_uid,target.version,target.operation,Date.now());
+          importedRecords++;
         }
-
-        const runRes = stmtInsertVersion.run({
-          ':owner': owner,
-          ':ct': ver.content_type,
-          ':uid': ver.item_uid,
-          ':version': ver.version,
-          ':op': ver.operation || 'UPSERT',
-          ':checksum': ver.checksum,
-          ':mimeType': ver.mime_type,
-          ':ext': ver.ext,
-          ':blobPath': blobPathOnDisk,
-          ':versionTitle': ver.version_title || '灾备导入快照',
-          ':sizeBytes': ver.size_bytes || 0,
-          ':isLocked': ver.is_locked || 0,
-          ':createdAt': ver.created_at || Date.now(),
-          ':clientId': 'disaster_recovery_import',
-        });
-        if (runRes && runRes.changes > 0) {
-          importedVersions++;
-        }
-      }
-    });
-
-
-    // 落地写盘 Blob 文件
-    if (directories) {
-      for (const ver of manifest.versions || []) {
-        if (ver.blob_entry_name && blobMap.has(ver.blob_entry_name)) {
-          const blobBuf = blobMap.get(ver.blob_entry_name);
-          const dir = this.store.getItemDir(directories, ver.content_type, ver.item_uid);
-          await fs.mkdir(dir, { recursive: true });
-          const targetPath = path.join(dir, `v${ver.version}.${ver.ext || 'bin'}`);
-          await fs.writeFile(targetPath, blobBuf);
-        }
-      }
-    }
-
-    if (this.audit) {
-      this.audit.log({
-        actor: requesterHandle,
-        action: 'import_backup',
-        result: 'success',
-        details: { importedRecords, importedVersions, conflictCount },
       });
+    } catch (error) {
+      await this.committer.discard(staged);
+      throw error;
     }
-
-    return {
-      success: true,
-      importedRecords,
-      importedVersions,
-      conflictCount,
-      details,
-    };
+    this.audit?.log({ actor: requesterHandle, action: 'import_backup', result: 'success', details: { importedRecords, importedVersions, conflictCount } });
+    return { success: true, importedRecords, importedVersions, conflictCount, details };
   }
 }

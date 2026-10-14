@@ -148,7 +148,7 @@ export class DeterministicZip {
     // 1. 逆向查找 End of Central Directory Record (EOCD: 0x06054b50)
     let eocdOffset = -1;
     const maxSearch = Math.min(zipBuffer.length - 22, 65535 + 22);
-    for (let i = zipBuffer.length - 22; i >= zipBuffer.length - 22 - maxSearch; i--) {
+    for (let i = zipBuffer.length - 22; i >= Math.max(0, zipBuffer.length - 22 - maxSearch); i--) {
       if (zipBuffer.readUInt32LE(i) === 0x06054b50) {
         eocdOffset = i;
         break;
@@ -164,6 +164,7 @@ export class DeterministicZip {
     const cdOffset = zipBuffer.readUInt32LE(eocdOffset + 16);
 
     const results = [];
+    let totalSize = 0;
     let curCd = cdOffset;
 
     for (let i = 0; i < totalEntries; i++) {
@@ -180,6 +181,8 @@ export class DeterministicZip {
       const expectedCrc = zipBuffer.readUInt32LE(curCd + 16);
       const compSize = zipBuffer.readUInt32LE(curCd + 20);
       const uncompSize = zipBuffer.readUInt32LE(curCd + 24);
+      totalSize += uncompSize;
+      if (totalSize > 512 * 1024 * 1024 || uncompSize > 128 * 1024 * 1024) throw new Error('Backup exceeds decompressed size limit');
       const nameLen = zipBuffer.readUInt16LE(curCd + 28);
       const extraLen = zipBuffer.readUInt16LE(curCd + 30);
       const commentLen = zipBuffer.readUInt16LE(curCd + 32);
@@ -216,12 +219,13 @@ export class DeterministicZip {
       if (method === 0) {
         uncompressedData = rawData;
       } else if (method === 8) {
-        uncompressedData = zlib.inflateRawSync(rawData);
+        uncompressedData = zlib.inflateRawSync(rawData, { maxOutputLength: Math.max(1, uncompSize) });
       } else {
         throw new Error(`Unsupported compression method ${method} for ${fileName}`);
       }
 
       // 校验 CRC32
+      if (uncompressedData.length !== uncompSize) throw new Error('ZIP entry size mismatch');
       const actualCrc = zlib.crc32(uncompressedData);
       if (actualCrc !== expectedCrc) {
         throw new Error(`CRC-32 mismatch for ${fileName}: expected ${expectedCrc}, got ${actualCrc}`);

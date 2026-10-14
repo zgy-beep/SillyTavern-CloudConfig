@@ -1,3 +1,4 @@
+import { mountDialog, escapeHtml, notify } from './dialog.js';
 /**
  * 插件管理看板与去重清理工具弹窗 (adminDialog)
  * 落实 P5-6, N-8, TC9, TC10
@@ -19,27 +20,27 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
   const dialog = document.createElement('div');
   dialog.style.cssText = `
     width: 620px; max-width: 95vw; max-height: 85vh;
-    background: #1a1e24; border: 1px solid rgba(255,255,255,0.18);
+    background: #1a1e24; border: 1px solid color-mix(in srgb, var(--cfgsync-text) 18%, transparent);
     border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.5);
     display: flex; flex-direction: column; overflow: hidden;
-    color: #e6edf3; font-family: sans-serif;
+    color: var(--cfgsync-text); font-family: inherit;
   `;
 
   dialog.innerHTML = `
-    <div style="padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.02);">
+    <div style="padding: 14px 18px; border-bottom: 1px solid color-mix(in srgb, var(--cfgsync-text) 10%, transparent); display: flex; justify-content: space-between; align-items: center; background: color-mix(in srgb, var(--cfgsync-text) 2%, transparent);">
       <div style="display:flex; align-items:center; gap:8px;">
-        <i class="fa-solid fa-chart-pie" style="color:#58a6ff; font-size:16px;"></i>
+        <i class="fa-solid fa-chart-pie" style="color:var(--cfgsync-accent); font-size:16px;"></i>
         <span style="font-weight:600; font-size:14px;">插件管理看板与存储分析</span>
-        <span id="cfgsync-dashboard-role-badge" style="font-size:10px; padding:1px 6px; border-radius:10px; background:rgba(88,166,255,0.15); color:#58a6ff; border:1px solid rgba(88,166,255,0.3);"></span>
+        <span id="cfgsync-dashboard-role-badge" style="font-size:10px; padding:1px 6px; border-radius:10px; background:rgba(88,166,255,0.15); color:var(--cfgsync-accent); border:1px solid rgba(88,166,255,0.3);"></span>
       </div>
-      <button id="cfgsync-dash-close-x" style="background:transparent; border:none; color:rgba(255,255,255,0.5); cursor:pointer; font-size:16px; padding:0 4px;">&times;</button>
+      <button id="cfgsync-dash-close-x" style="background:transparent; border:none; color:color-mix(in srgb, var(--cfgsync-text) 50%, transparent); cursor:pointer; font-size:16px; padding:0 4px;">&times;</button>
     </div>
 
     <div id="cfgsync-dash-body" style="padding: 16px 18px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px;">
-      <div style="text-align:center; padding:24px; color:rgba(255,255,255,0.5);"><i class="fa-solid fa-spinner fa-spin"></i> 正在读取存储指标...</div>
+      <div style="text-align:center; padding:24px; color:color-mix(in srgb, var(--cfgsync-text) 50%, transparent);"><i class="fa-solid fa-spinner fa-spin"></i> 正在读取存储指标...</div>
     </div>
 
-    <div style="padding: 10px 18px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: flex-end; background: rgba(255,255,255,0.02);">
+    <div style="padding: 10px 18px; border-top: 1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent); display: flex; justify-content: flex-end; background: color-mix(in srgb, var(--cfgsync-text) 2%, transparent);">
       <button id="cfgsync-dash-close-btn" class="menu_button" style="padding: 5px 14px; font-size: 12px; cursor: pointer; border-radius: 4px;">关闭</button>
     </div>
   `;
@@ -89,26 +90,26 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
 
       // 1. 用户自身视角
       html += `
-        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:12px 14px;">
-          <div style="font-size:12px; font-weight:600; color:#58a6ff; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <div style="background:color-mix(in srgb, var(--cfgsync-text) 3%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent); border-radius:6px; padding:12px 14px;">
+          <div style="font-size:12px; font-weight:600; color:var(--cfgsync-accent); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
             <i class="fa-solid fa-user"></i> <span>账号视角指标 (@${user.handle})</span>
           </div>
           <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; text-align:center;">
             <div style="background:rgba(0,0,0,0.25); padding:8px; border-radius:4px;">
               <div style="font-size:11px; opacity:0.65;">历史版本数</div>
-              <div style="font-size:16px; font-weight:600; color:#f0f6fc; margin-top:2px;">${user.total_versions || 0}</div>
+              <div style="font-size:16px; font-weight:600; color:var(--cfgsync-text); margin-top:2px;">${user.total_versions || 0}</div>
             </div>
             <div style="background:rgba(0,0,0,0.25); padding:8px; border-radius:4px;">
               <div style="font-size:11px; opacity:0.65;">活跃配置项</div>
-              <div style="font-size:16px; font-weight:600; color:#52c41a; margin-top:2px;">${user.active_items || 0}</div>
+              <div style="font-size:16px; font-weight:600; color:var(--cfgsync-success); margin-top:2px;">${user.active_items || 0}</div>
             </div>
             <div style="background:rgba(0,0,0,0.25); padding:8px; border-radius:4px;">
               <div style="font-size:11px; opacity:0.65;">已删除墓碑</div>
-              <div style="font-size:16px; font-weight:600; color:#faad14; margin-top:2px;">${user.deleted_items || 0}</div>
+              <div style="font-size:16px; font-weight:600; color:var(--cfgsync-warning); margin-top:2px;">${user.deleted_items || 0}</div>
             </div>
             <div style="background:rgba(0,0,0,0.25); padding:8px; border-radius:4px;">
               <div style="font-size:11px; opacity:0.65;">名下快照总体积</div>
-              <div style="font-size:16px; font-weight:600; color:#69c0ff; margin-top:2px;">${formatBytes(user.total_logical_bytes)}</div>
+              <div style="font-size:16px; font-weight:600; color:var(--cfgsync-accent); margin-top:2px;">${formatBytes(user.total_logical_bytes)}</div>
             </div>
           </div>
         </div>
@@ -129,7 +130,7 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
             <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:8px; text-align:center;">
               <div style="background:rgba(0,0,0,0.25); padding:8px; border-radius:4px;">
                 <div style="font-size:11px; opacity:0.65;">全站用户数</div>
-                <div style="font-size:16px; font-weight:600; color:#f0f6fc; margin-top:2px;">${global.total_users || 0}</div>
+                <div style="font-size:16px; font-weight:600; color:var(--cfgsync-text); margin-top:2px;">${global.total_users || 0}</div>
               </div>
               <div style="background:rgba(0,0,0,0.25); padding:8px; border-radius:4px;">
                 <div style="font-size:11px; opacity:0.65;">锁定受保护快照</div>
@@ -141,7 +142,7 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
               </div>
               <div style="background:rgba(0,0,0,0.25); padding:8px; border-radius:4px;">
                 <div style="font-size:11px; opacity:0.65;">去重节省比例</div>
-                <div style="font-size:16px; font-weight:600; color:#52c41a; margin-top:2px;">${savingRatio}%</div>
+                <div style="font-size:16px; font-weight:600; color:var(--cfgsync-success); margin-top:2px;">${savingRatio}%</div>
               </div>
             </div>
           </div>
@@ -150,19 +151,19 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
 
       // 3. 孤儿快照两阶段清理工具 (2-Stage Clean Tools, P5-6, TC10)
       html += `
-        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:12px 14px;">
+        <div style="background:color-mix(in srgb, var(--cfgsync-text) 3%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent); border-radius:6px; padding:12px 14px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <div style="font-size:12px; font-weight:600; color:#faad14; display:flex; align-items:center; gap:6px;">
+            <div style="font-size:12px; font-weight:600; color:var(--cfgsync-warning); display:flex; align-items:center; gap:6px;">
               <i class="fa-solid fa-broom"></i> <span>孤儿快照两阶段清理工具</span>
             </div>
-            <button id="cfgsync-scan-orphans-btn" class="menu_button" style="padding:3px 10px; font-size:11px; border-radius:4px; cursor:pointer; background:rgba(250,173,20,0.15); border:1px solid rgba(250,173,20,0.4); color:#faad14;">
+            <button id="cfgsync-scan-orphans-btn" class="menu_button" style="padding:3px 10px; font-size:11px; border-radius:4px; cursor:pointer; background:rgba(250,173,20,0.15); border:1px solid rgba(250,173,20,0.4); color:var(--cfgsync-warning);">
               <i class="fa-solid fa-magnifying-glass"></i> 扫描预览
             </button>
           </div>
-          <div style="font-size:11px; line-height:1.4; color:rgba(255,255,255,0.55); margin-bottom:8px;">
+          <div style="font-size:11px; line-height:1.4; color:color-mix(in srgb, var(--cfgsync-text) 55%, transparent); margin-bottom:8px;">
             安全原则：仅扫描已标记删除（墓碑状态）且<strong>未加锁</strong>的废弃历史版本；带有金锁 🔒 标记的快照永不被删。
           </div>
-          <div id="cfgsync-orphans-result-area" style="display:none; background:rgba(0,0,0,0.2); border:1px dashed rgba(255,255,255,0.12); border-radius:4px; padding:10px;">
+          <div id="cfgsync-orphans-result-area" style="display:none; background:rgba(0,0,0,0.2); border:1px dashed color-mix(in srgb, var(--cfgsync-text) 12%, transparent); border-radius:4px; padding:10px;">
           </div>
         </div>
       `;
@@ -177,7 +178,7 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
       const webdavDriver = storageHealth?.webdav || { enabled: false };
 
       html += `
-        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:12px 14px;">
+        <div style="background:color-mix(in srgb, var(--cfgsync-text) 3%, transparent); border:1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent); border-radius:6px; padding:12px 14px;">
           <div style="font-size:12px; font-weight:600; color:#b37feb; margin-bottom:10px; display:flex; align-items:center; justify-content:space-between;">
             <div style="display:flex; align-items:center; gap:6px;">
               <i class="fa-solid fa-box-archive"></i> <span>全量灾备归档与外部存储驱动 (M3/M6)</span>
@@ -186,7 +187,7 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
               <button id="cfgsync-admin-dr-export-btn" class="menu_button" style="padding:3px 9px; font-size:11px; border-radius:4px; cursor:pointer; background:rgba(179,127,235,0.15); border:1px solid rgba(179,127,235,0.4); color:#b37feb;">
                 <i class="fa-solid fa-file-zipper"></i> 导出灾备包
               </button>
-              <button id="cfgsync-admin-dr-import-btn" class="menu_button" style="padding:3px 9px; font-size:11px; border-radius:4px; cursor:pointer; background:rgba(250,173,20,0.15); border:1px solid rgba(250,173,20,0.4); color:#faad14;">
+              <button id="cfgsync-admin-dr-import-btn" class="menu_button" style="padding:3px 9px; font-size:11px; border-radius:4px; cursor:pointer; background:rgba(250,173,20,0.15); border:1px solid rgba(250,173,20,0.4); color:var(--cfgsync-warning);">
                 <i class="fa-solid fa-file-import"></i> 导入灾备包
               </button>
               <input type="file" id="cfgsync-admin-dr-file-input" accept=".zip,application/zip" style="display:none;" />
@@ -195,28 +196,28 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
 
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; font-size:11.5px;">
             <!-- LocalPath 状态 -->
-            <div style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.08); border-radius:5px; padding:8px 10px;">
+            <div style="background:rgba(0,0,0,0.25); border:1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent); border-radius:5px; padding:8px 10px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <strong style="color:#e6edf3;">LocalPath (本地/SMB挂载)</strong>
-                <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:${localDriver.enabled ? (localDriver.healthy ? 'rgba(82,196,26,0.2)' : 'rgba(248,81,73,0.2)') : 'rgba(255,255,255,0.08)'}; color:${localDriver.enabled ? (localDriver.healthy ? '#52c41a' : '#f85149') : '#8b949e'};">
+                <strong style="color:var(--cfgsync-text);">LocalPath (本地/SMB挂载)</strong>
+                <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:${localDriver.enabled ? (localDriver.healthy ? 'rgba(82,196,26,0.2)' : 'rgba(248,81,73,0.2)') : 'color-mix(in srgb, var(--cfgsync-text) 8%, transparent)'}; color:${localDriver.enabled ? (localDriver.healthy ? 'var(--cfgsync-success)' : 'var(--cfgsync-danger)') : 'var(--cfgsync-muted)'};">
                   ${localDriver.enabled ? (localDriver.healthy ? '就绪 (Healthy)' : '未就绪 (异常)') : '未启用'}
                 </span>
               </div>
-              <div style="color:rgba(255,255,255,0.6); font-size:11px; word-break:break-all; line-height:1.4;">
+              <div style="color:color-mix(in srgb, var(--cfgsync-text) 60%, transparent); font-size:11px; word-break:break-all; line-height:1.4;">
                 ${localDriver.enabled ? `路径: <code>${localDriver.resolvedPath || localDriver.path || '未指定'}</code>` : '可在设置中配置本地镜像同步目录'}
               </div>
-              ${localDriver.containerWarning ? `<div style="margin-top:4px; color:#faad14; font-size:10.5px; line-height:1.3;">${localDriver.containerWarning}</div>` : ''}
+              ${localDriver.containerWarning ? `<div style="margin-top:4px; color:var(--cfgsync-warning); font-size:10.5px; line-height:1.3;">${localDriver.containerWarning}</div>` : ''}
             </div>
 
             <!-- WebDAV 状态 -->
-            <div style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.08); border-radius:5px; padding:8px 10px;">
+            <div style="background:rgba(0,0,0,0.25); border:1px solid color-mix(in srgb, var(--cfgsync-text) 8%, transparent); border-radius:5px; padding:8px 10px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <strong style="color:#e6edf3;">WebDAV 远端网盘</strong>
-                <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:${webdavDriver.enabled ? (webdavDriver.healthy ? 'rgba(82,196,26,0.2)' : 'rgba(248,81,73,0.2)') : 'rgba(255,255,255,0.08)'}; color:${webdavDriver.enabled ? (webdavDriver.healthy ? '#52c41a' : '#f85149') : '#8b949e'};">
+                <strong style="color:var(--cfgsync-text);">WebDAV 远端网盘</strong>
+                <span style="font-size:10px; padding:1px 5px; border-radius:3px; background:${webdavDriver.enabled ? (webdavDriver.healthy ? 'rgba(82,196,26,0.2)' : 'rgba(248,81,73,0.2)') : 'color-mix(in srgb, var(--cfgsync-text) 8%, transparent)'}; color:${webdavDriver.enabled ? (webdavDriver.healthy ? 'var(--cfgsync-success)' : 'var(--cfgsync-danger)') : 'var(--cfgsync-muted)'};">
                   ${webdavDriver.enabled ? (webdavDriver.healthy ? '正常' : webdavDriver.code || '未连接') : '未启用'}
                 </span>
               </div>
-              <div style="color:rgba(255,255,255,0.6); font-size:11px; line-height:1.4;">
+              <div style="color:color-mix(in srgb, var(--cfgsync-text) 60%, transparent); font-size:11px; line-height:1.4;">
                 ${webdavDriver.enabled ? (webdavDriver.message || (webdavDriver.healthy ? '连接正常' : '连接异常')) : '可在设置中配置群晖/Alist/Nextcloud'}
               </div>
             </div>
@@ -242,21 +243,21 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
 
             if (preview.candidate_count === 0) {
               resultArea.innerHTML = `
-                <div style="font-size:11.5px; color:#52c41a; text-align:center; padding:6px 0;">
+                <div style="font-size:11.5px; color:var(--cfgsync-success); text-align:center; padding:6px 0;">
                   <i class="fa-solid fa-check-circle"></i> 当前没有任何未锁定的孤儿快照，存储健康度良好！
                 </div>
               `;
             } else {
               resultArea.innerHTML = `
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                  <span style="font-size:12px; color:#f0f6fc;">
+                  <span style="font-size:12px; color:var(--cfgsync-text);">
                     发现 <strong>${preview.candidate_count}</strong> 个待清理快照（预估可释放约 <strong>${formatBytes(preview.reclaimable_bytes)}</strong> 空间）
                   </span>
-                  <button id="cfgsync-confirm-clean-btn" class="menu_button" style="padding:4px 12px; font-size:11.5px; background:rgba(248,81,73,0.2); border:1px solid rgba(248,81,73,0.5); color:#f85149; cursor:pointer; border-radius:4px; font-weight:600;">
+                  <button id="cfgsync-confirm-clean-btn" class="menu_button" style="padding:4px 12px; font-size:11.5px; background:rgba(248,81,73,0.2); border:1px solid rgba(248,81,73,0.5); color:var(--cfgsync-danger); cursor:pointer; border-radius:4px; font-weight:600;">
                     <i class="fa-solid fa-trash"></i> 确认清理
                   </button>
                 </div>
-                <div style="max-height:140px; overflow-y:auto; font-size:11px; color:rgba(255,255,255,0.65); line-height:1.5;">
+                <div style="max-height:140px; overflow-y:auto; font-size:11px; color:color-mix(in srgb, var(--cfgsync-text) 65%, transparent); line-height:1.5;">
                   ${preview.candidates.map(c => `<div>• [${c.content_type}] ${c.version_title || '快照 v' + c.version} (@${c.owner_handle}) - ${formatBytes(c.size_bytes)}</div>`).join('')}
                 </div>
               `;
@@ -273,10 +274,10 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
 
                   try {
                     const cleanRes = await api.cleanOrphans(false);
-                    alert(`【孤儿快照清理完成】\n\n成功清除: ${cleanRes.deleted_count} 个版本\n释放空间: ${formatBytes(cleanRes.freed_bytes)}`);
+                    notify(`【孤儿快照清理完成】\n\n成功清除: ${cleanRes.deleted_count} 个版本\n释放空间: ${formatBytes(cleanRes.freed_bytes)}`);
                     await renderDashboard();
                   } catch (e) {
-                    alert(`清理失败: ${e.message}`);
+                    notify(`清理失败: ${e.message}`);
                     confirmCleanBtn.disabled = false;
                     confirmCleanBtn.innerHTML = '<i class="fa-solid fa-trash"></i> 确认清理';
                   }
@@ -284,7 +285,7 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
               }
             }
           } catch (err) {
-            alert(`扫描失败: ${err.message}`);
+            notify(`扫描失败: ${escapeHtml(err.message)}`);
           } finally {
             scanBtn.disabled = false;
             scanBtn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> 扫描预览';
@@ -315,9 +316,9 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
               document.body.removeChild(a);
               URL.revokeObjectURL(url);
             }, 1000);
-            alert(`【灾备导出成功】\n已下载: ${fileName}`);
+            notify(`【灾备导出成功】\n已下载: ${fileName}`);
           } catch (e) {
-            alert(`导出失败: ${e.message}`);
+            notify(`导出失败: ${e.message}`);
           } finally {
             adminExportBtn.disabled = false;
             adminExportBtn.innerHTML = '<i class="fa-solid fa-file-zipper"></i> 导出灾备包';
@@ -340,10 +341,10 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
           adminImportBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 导入中...';
           try {
             const res = await api.importBackup(file);
-            alert(`【灾备安全导入完成】\n\n• 新增/同步配置项: ${res.importedRecords || 0} 个\n• 导入历史快照版本: ${res.importedVersions || 0} 个\n• 冲突项安全保留为新版本: ${res.conflictCount || 0} 个`);
+            notify(`【灾备安全导入完成】\n\n• 新增/同步配置项: ${res.importedRecords || 0} 个\n• 导入历史快照版本: ${res.importedVersions || 0} 个\n• 冲突项安全保留为新版本: ${res.conflictCount || 0} 个`);
             await renderDashboard();
           } catch (e) {
-            alert(`导入失败: ${e.message}`);
+            notify(`导入失败: ${e.message}`);
           } finally {
             adminFileInput.value = '';
             adminImportBtn.disabled = false;
@@ -353,7 +354,7 @@ export function showAdminDashboardDialog({ api, isAdmin = false, onClose = null 
       }
     } catch (err) {
 
-      bodyEl.innerHTML = `<div style="text-align:center; padding:24px; color:#f85149;">加载看板失败: ${err.message}</div>`;
+      bodyEl.innerHTML = `<div style="text-align:center; padding:24px; color:var(--cfgsync-danger);">加载看板失败: ${escapeHtml(err.message)}</div>`;
     }
   };
 

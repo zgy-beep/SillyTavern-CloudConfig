@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CloudConfig · 界面预览</title>
+<style>
+  :root { --SmartThemeBodyColor:#e9ebef; --SmartThemeBlurTintColor:#20232b; --SmartThemeQuoteColor:#94bcb0; font-family:system-ui,-apple-system,"Segoe UI",sans-serif; color-scheme:dark; }
+  :root[data-theme="light"] { --SmartThemeBodyColor:#263244; --SmartThemeBlurTintColor:#fcfcfd; --SmartThemeQuoteColor:#326f61; color-scheme:light; }
+  body { margin:0;background:var(--SmartThemeBlurTintColor);color:var(--SmartThemeBodyColor); }
+  .preview-controls { position:fixed;top:0;left:0;right:0;height:38px;z-index:100020;display:flex;align-items:center;justify-content:center;gap:16px;background:var(--SmartThemeBlurTintColor);border-bottom:1px solid #8883;font-size:12px; }
+  .preview-controls button { cursor:pointer;border:1px solid #8885;border-radius:6px;padding:3px 10px;color:inherit;background:transparent; }
+  #entry { width:min(600px,90vw);margin:100px auto; }
+  #cfgsync-main-modal-backdrop { padding-top:50px !important; }
+  #cfgsync-modal-dialog .cfgsync-panel-container { max-height:calc(100dvh - 72px) !important; }
+</style></head>
+<body><div class="preview-controls"><span>示例数据预览</span><button id="theme">切换明暗主题</button><button id="mobile">手机宽度</button><button id="desktop">桌面宽度</button></div><main id="entry"></main>
+<script type="module">
+import { CloudConfigPanel } from '/src/client/ui/panel.js';
+import { ClientSyncManager } from '/src/client/syncManager.js';
+const uid = n => String(n).padStart(64,'0');
+const now = Date.now();
+const locals = {world:[
+  {itemUid:uid(1),displayName:'雾港 · 城市设定',sourceRef:'雾港.json'},
+  {itemUid:uid(2),displayName:'角色互动规则',sourceRef:'角色互动规则.json'},
+  {itemUid:uid(3),displayName:'旅途记忆与时间线',sourceRef:'旅途记忆.json'},
+  {itemUid:uid(4),displayName:'新故事的草稿',sourceRef:'新故事.json'},
+],openai_preset:[{itemUid:uid(5),displayName:'日常对话',sourceRef:'日常对话.json'}],instruct:[{itemUid:uid(7),displayName:'通用指令模板',sourceRef:'通用指令模板.json'}],settings:[{itemUid:uid(6),displayName:'通用设置',sourceRef:'settings.json'}]};
+const clouds={world:[
+  {item_uid:uid(1),owner_handle:'demo',display_name:'雾港 · 城市设定',current_version:8,current_checksum:'a',updated_at:now},
+  {item_uid:uid(2),owner_handle:'demo',display_name:'角色互动规则',current_version:3,current_checksum:'b',updated_at:now},
+  {item_uid:uid(3),owner_handle:'demo',display_name:'旅途记忆与时间线',current_version:5,current_checksum:'c',updated_at:now},
+  {item_uid:uid(1),owner_handle:'family',display_name:'雾港 · 城市设定',current_version:2,current_checksum:'d',updated_at:now},
+],openai_preset:[],settings:[]};
+const bindings=new Map(),backups=new Map();
+const storage={makeBindingUid:(account,owner,type,id)=>[account,owner,type,id].join(':'),getBindingsByAccount:async()=>[...bindings.values()],getBinding:async id=>bindings.get(id),saveBinding:async b=>bindings.set(b.binding_uid,b),saveBackup:async(id,account,content)=>backups.set(id,{snapshot_content:content}),getBackup:async id=>backups.get(id)};
+for(const [id,version,state] of [[1,8,'SYNCED'],[2,2,'CONFLICT'],[3,5,'SYNCED']]) {
+ const binding_uid=storage.makeBindingUid('demo','demo','world',uid(id));bindings.set(binding_uid,{binding_uid,account_handle:'demo',source_owner_handle:'demo',sync_mode:'OWN',content_type:'world',item_uid:uid(id),display_name:locals.world[id-1].displayName,enabled:true,state,last_synced_version:version,last_notified_version:version});backups.set(binding_uid,{snapshot_content:{entries:{}}});
+}
+const api={
+ getContentTypes:async()=>({current_user:'demo',is_admin:true,allow_settings_sharing:false,activeTypes:['world','openai_preset','settings','instruct']}),
+ getItems:async(type,owner,scope)=>({items:scope==='local'?(locals[type]||[]):(clouds[type]||[])}),
+ getConfig:async()=>({is_admin:true,config:{maxVersions:20,excludeHeavyExtensions:true,webdavPasswordConfigured:true}}),
+ getStorageHealth:async()=>({healthy:true,local:{enabled:false},webdav:{enabled:false}}),
+ updateConfig:async()=>({success:true}),readLocal:async()=>({content:{entries:{}}}),restoreLocal:async()=>({success:true}),
+ getVersions:async()=>({versions:[{version:8,version_title:'整理城市人物关系',size_bytes:24018,created_at:now-120000,is_locked:false},{version:7,version_title:'更新雾港地理与商会',size_bytes:23118,created_at:now-3600000,is_locked:true},{version:6,version_title:'最初的雾港设定',size_bytes:19120,created_at:now-86400000,is_locked:false}]}),
+ pull:async(type,id,owner,version)=>({content:{entries:{}},owner_handle:owner,version:version||8,checksum:'preview',reload_strategy:'none'}),
+ push:async data=>({success:true,version:data.baseVersion+1,checksum:'preview',size_bytes:1000}),
+ deleteVersion:async()=>({success:true}),setVersionLock:async()=>({success:true}),
+ getOutgoingShares:async()=>({shares:[]}),getIncomingShares:async()=>({shares:[]}),
+};
+const panel=new CloudConfigPanel({api,storage,syncManager:new ClientSyncManager(api,storage),accountHandle:'demo'});
+panel.render(document.getElementById('entry'));panel.openModal();
+document.getElementById('theme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light';};
+document.getElementById('mobile').onclick=()=>{if(!document.getElementById('mobile-frame')){panel.closeModal();const frame=document.createElement('iframe');frame.id='mobile-frame';frame.src='/?embedded=1';frame.style.cssText='width:390px;height:820px;max-width:100vw;border:1px solid #8883;border-radius:18px;display:block;margin:60px auto 0;';document.body.appendChild(frame);}};
+document.getElementById('desktop').onclick=()=>{document.getElementById('mobile-frame')?.remove();panel.openModal();};
+if(location.search.includes('embedded'))document.querySelector('.preview-controls').style.display='none';
+window.addEventListener('error',event=>{document.body.dataset.previewError=event.message;});
+</script></body></html>

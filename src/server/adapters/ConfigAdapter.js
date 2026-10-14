@@ -66,6 +66,23 @@ export class ConfigAdapter {
     throw new Error('apply() not implemented');
   }
 
+  /** Restore the captured bytes without the normal settings/chat merge policy. */
+  async restore(directories, itemUid, content, displayName) {
+    const filePath = await this.getFilePath?.(directories, itemUid);
+    if (!filePath) return this.apply(directories, itemUid, 'UPSERT', content, displayName);
+    const fs = await import('node:fs/promises');
+    const { randomUUID } = await import('node:crypto');
+    const { autoBackupLocalFile } = await import('./P0Adapters.js');
+    await autoBackupLocalFile(filePath);
+    const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+    try {
+      const handle = await fs.open(tmpPath, 'wx');
+      try { await handle.writeFile(this.serialize(content).buffer); await handle.sync(); }
+      finally { await handle.close(); }
+      await fs.rename(tmpPath, filePath);
+    } finally { await fs.unlink(tmpPath).catch(() => {}); }
+  }
+
   /**
    * 序列化为可存储的 Blob
    * @param {any} content

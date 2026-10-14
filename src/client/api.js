@@ -91,7 +91,15 @@ export class CloudConfigApi {
     return this.request(`/pull?${params.toString()}`);
   }
 
-  async push({ contentType, itemUid, displayName, baseVersion, operation, checksum, payload, clientId, versionTitle, force, excludeHeavy, exclude_heavy }) {
+  async readLocal(contentType, itemUid) {
+    return this.request(`/local-content?${new URLSearchParams({ content_type: contentType, item_uid: itemUid })}`);
+  }
+
+  async restoreLocal(contentType, itemUid, content, displayName) {
+    return this.request('/restore-local', { method: 'POST', body: JSON.stringify({ content_type: contentType, item_uid: itemUid, content, display_name: displayName }) });
+  }
+
+  async push({ contentType, itemUid, displayName, baseVersion, operation, checksum, payload, clientId, versionTitle, force, excludeHeavy, exclude_heavy, skipUnchanged }) {
     const effExcludeHeavy = excludeHeavy !== undefined ? excludeHeavy : exclude_heavy;
     return this.request('/push', {
       method: 'POST',
@@ -107,6 +115,7 @@ export class CloudConfigApi {
         version_title: versionTitle,
         force,
         exclude_heavy: effExcludeHeavy,
+        skip_unchanged: skipUnchanged,
       }),
     });
   }

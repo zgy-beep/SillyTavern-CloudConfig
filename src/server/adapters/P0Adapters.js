@@ -288,7 +288,11 @@ export class SettingsAdapter extends JsonConfigAdapter {
     if (!content) {
       throw new Error(`Settings file not found at ${filePath}`);
     }
-    // 默认精简排除酒馆助手庞大变量与脚本库 (~4.7MB)
+    return this.prepareSnapshot(content, options);
+  }
+
+  prepareSnapshot(content, options = {}) {
+    // Snapshot filtering also applies to content supplied by the browser.
     const excludeHeavy = options.excludeHeavy !== undefined ? options.excludeHeavy : true;
     if (excludeHeavy && content?.oai_settings?.extensions?.tavern_helper) {
       const cloned = JSON.parse(JSON.stringify(content));

@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { DatabaseClient } from './src/server/db/database.js';
 import { createP0Adapters, cleanupStraySecrets } from './src/server/adapters/P0Adapters.js';
@@ -84,10 +85,18 @@ export async function init(router) {
     auditService,
     backupFn: async (reason) => {
       const exportResult = await disasterRecoveryService.exportBackup();
+      const backupDir = path.join(dataRoot, 'backups');
+      await fs.mkdir(backupDir, { recursive: true });
+      const fileName = `scheduled-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
+      const backupPath = path.join(backupDir, fileName);
+      await fs.writeFile(`${backupPath}.tmp`, exportResult.buffer);
+      await fs.rename(`${backupPath}.tmp`, backupPath);
       if (storageMirrorService) {
-        const dateStr = new Date().toISOString().slice(0, 10);
-        await storageMirrorService.mirrorBlob(`backups/scheduled-${dateStr}.zip`, exportResult.buffer);
+        const result = await storageMirrorService.mirrorBlob(`backups/${fileName}`, exportResult.buffer);
+        if (Object.values(result).some(r => r && !r.success)) throw new Error('Local backup saved; external backup mirror failed');
       }
+      const backups = (await fs.readdir(backupDir)).filter(n => n.startsWith('scheduled-') && n.endsWith('.zip')).sort().reverse();
+      for (const name of backups.slice(7)) await fs.unlink(path.join(backupDir, name));
       return { bytes: exportResult.buffer.length, reason };
     },
   });
@@ -96,6 +105,7 @@ export async function init(router) {
   // 3. 挂载前端扩展静态资源目录
   const clientDir = path.join(__dirname, 'src', 'client');
   router.use('/client', express.static(clientDir));
+  router.use('/common', express.static(path.join(__dirname, 'src', 'common')));
 
   // 4. 挂载服务端业务路由
   const pluginRouter = createPluginRouter({
@@ -120,8 +130,13 @@ export async function init(router) {
       await cleanupStraySecrets();
       const activeRows = dbClient.prepare('SELECT blob_path FROM config_versions WHERE blob_path IS NOT NULL').all();
       const activePaths = new Set(activeRows.map(r => r.blob_path));
-      // 遍历所有已记录的用户目录执行清理（在此记录的路径视为有效）
-      // snapshotStore.cleanupOrphans 会基于 activePaths 过滤
+      const accountsRoot = path.dirname(dataRoot);
+      const accounts = await fs.readdir(accountsRoot, { withFileTypes: true });
+      for (const account of accounts.filter(entry => entry.isDirectory() && entry.name !== path.basename(dataRoot))) {
+        const root = path.join(accountsRoot, account.name);
+        await snapshotStore.cleanupOrphans({ root }, activePaths);
+        await snapshotStore.cleanupOrphans({ user: path.join(root, 'user') }, activePaths);
+      }
     } catch (e) {
       console.warn(`[${info.name}] GC warning:`, e.message);
     }
