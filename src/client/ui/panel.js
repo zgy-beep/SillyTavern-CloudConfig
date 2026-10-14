@@ -1,6 +1,7 @@
 import { buildItemList, TYPE_LABELS, bindingKey, itemKey, isOwnBinding } from '../listModel.js';
 import { ensureTheme, escapeHtml, notify, chooseDisable } from './dialog.js';
 import { SyncState, SyncMode, ReloadStrategy } from '../../common/constants.js';
+import { isSyncTypeEnabled } from '../../common/syncTypes.js';
 import { showConflictDialog } from './conflictDialog.js';
 import { showClaimDialog, showShareDialog } from './shareDialog.js';
 import { showPushDialog } from './pushDialog.js';
@@ -561,7 +562,7 @@ export class CloudConfigPanel {
     const entryTextSpan = entryBackupBtn?.querySelector?.('.cfgsync-entry-backup-text');
 
     const bindings = await this.storage.getBindingsByAccount(this.accountHandle);
-    const enabledBindings = (bindings || []).filter(b => b.enabled && isOwnBinding(b, this.accountHandle));
+    const enabledBindings = (bindings || []).filter(b => b.enabled && isSyncTypeEnabled(b.content_type) && isOwnBinding(b, this.accountHandle));
 
     if (enabledBindings.length === 0) {
       notify('当前没有已开启云同步的配置项。\n请先勾选需要同步的项目复选框，再执行一键备份。');
@@ -698,7 +699,7 @@ export class CloudConfigPanel {
         'quick_replies',
       ];
 
-      const activeTypesToLoad = [...allActiveTypes].sort((a, b) => {
+      const activeTypesToLoad = allActiveTypes.filter(isSyncTypeEnabled).sort((a, b) => {
         const idxA = preferredOrder.indexOf(a);
         const idxB = preferredOrder.indexOf(b);
         return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
@@ -1401,13 +1402,10 @@ export class CloudConfigPanel {
     row._isLocked = isLocked;
 
     let leftBorderColor = hasCloud ? 'color-mix(in srgb, var(--cfgsync-text) 32%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 12%, transparent)';
-    let subTextColor = hasCloud ? 'var(--cfgsync-muted)' : 'color-mix(in srgb, var(--cfgsync-text) 35%, transparent)';
     if (state === SyncState.CONFLICT) {
       leftBorderColor = 'var(--cfgsync-danger)';
-      subTextColor = 'var(--cfgsync-danger)';
     } else if (hasCloud && !row._existsLocally) {
       leftBorderColor = 'var(--cfgsync-warning)';
-      subTextColor = 'var(--cfgsync-warning)';
     }
 
     row._defaultBg = hasCloud ? 'color-mix(in srgb, var(--cfgsync-text) 4%, transparent)' : 'color-mix(in srgb, var(--cfgsync-text) 2%, transparent)';
@@ -1438,13 +1436,17 @@ export class CloudConfigPanel {
 
     const refText = row.dataset.sourceOwner !== this.accountHandle ? `共享自 @${row.dataset.sourceOwner} · 只读订阅` : !row._existsLocally
       ? `来自云端 (@${cItem?.owner_handle || '云端'}) · 本地未下载`
-      : `${escapeHtml(item.sourceRef)}${!hasCloud ? ' · 仅本地' : ''}`;
+      : `${item.sourceRef || ''}${!hasCloud ? ' · 仅本地' : ''}`;
 
     row.innerHTML = `
-      <!-- 上层：复选框 + 完整配置名称 + 状态/快照胶囊 -->
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; min-width:0;">
-        <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1; overflow:hidden;">
-          <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} title="${isEnabled ? '已开启云同步 (取消勾选停用)' : (hasCloud ? '勾选开启自动同步' : '未同步：勾选后可在推送时自动关联同步')}" style="cursor:pointer; flex-shrink:0; width:15px; height:15px; margin:0; accent-color:var(--cfgsync-accent);" />
+      <label class="cfgsync-sync-control" title="开启或关闭此项同步">
+        <input type="checkbox" class="cfgsync-toggle" ${isEnabled ? 'checked' : ''} aria-label="同步 ${escapeHtml(item.displayName)}" />
+        <span class="cfgsync-check-visual" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4 10-10" /></svg></span>
+        <span class="cfgsync-check-caption" aria-hidden="true">${row.dataset.sourceOwner !== this.accountHandle ? '订阅' : '同步'}</span>
+      </label>
+      <div class="cfgsync-card-body">
+      <div class="cfgsync-card-header">
+        <div class="cfgsync-card-title">
           ${avatarHtml}
           ${(contentType === 'chat' || contentType === 'group_chat') && (item.characterName || (item.sourceRef && item.sourceRef.includes('/'))) ? `
             <span class="cfgsync-chat-char-tag" style="background:color-mix(in srgb, var(--cfgsync-text) 8%, transparent); color:var(--cfgsync-text); font-size:12px; padding:1px 6px; border-radius:3px; border:1px solid color-mix(in srgb, var(--cfgsync-text) 14%, transparent); font-weight:normal; flex-shrink:0;">${escapeHtml(item.characterName || item.sourceRef.split('/')[0])}</span>
@@ -1459,8 +1461,8 @@ export class CloudConfigPanel {
       </div>
 
       <!-- 下层：左侧文件来源说明 + 右侧操作按钮组 -->
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding-left:23px; min-width:0;">
-        <div class="cfgsync-row-ref" data-source-ref="${escapeHtml(item.sourceRef)}" title="${escapeHtml(item.sourceRef)}" style="font-size:12px; color:${subTextColor}; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; min-width:0; flex:1;">${escapeHtml(refText)}</div>
+      <div class="cfgsync-card-footer">
+        <div class="cfgsync-row-ref" data-source-ref="${escapeHtml(item.sourceRef)}" title="${escapeHtml(refText)}">${escapeHtml(refText)}</div>
         <div class="cfgsync-row-actions" style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
           <button class="cfgsync-pull-btn menu_button" type="button" title="${!row._existsLocally ? '从云端拉取此配置保存到本地 (生成本地副本)' : '重新从云端拉取此配置覆盖本地'}" style="${rowBtnStyle} ${!hasCloud ? 'opacity:0.25 !important; pointer-events:none !important;' : 'cursor:pointer !important;'}">拉取</button>
           <button class="cfgsync-push-btn menu_button" type="button" title="${hasCloud ? '备份到云端，保存新的快照' : '备份此预设或配置到云端，生成首个快照'}" style="${rowBtnStyle} ${!row._existsLocally ? 'opacity:0.25 !important; pointer-events:none !important;' : 'cursor:pointer !important;'}">备份</button>
@@ -1471,6 +1473,7 @@ export class CloudConfigPanel {
           <button class="cfgsync-delete-btn menu_button" type="button" title="删除配置 (云端备份 / 本地文件)" style="${rowBtnStyle} cursor:pointer !important;">删除</button>
           ` : ''}
         </div>
+      </div>
       </div>
     `;
 

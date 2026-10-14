@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildItemList, isOwnBinding } from '../../src/client/listModel.js';
 import { ClientSyncManager } from '../../src/client/syncManager.js';
+import { isSyncTypeEnabled } from '../../src/common/syncTypes.js';
+
+test('Removed categories cannot establish bindings or push legacy bindings', async () => {
+  const manager = new ClientSyncManager({ push: () => assert.fail('must not call API') }, {});
+  for (const type of ['novel_preset', 'kobold_preset', 'instruct', 'context', 'sysprompt', 'textgen_preset']) {
+    assert.equal(isSyncTypeEnabled(type), false);
+    await assert.rejects(manager.enableSync('alice', type, 'uid', 'name'), /停止提供同步/);
+    await assert.rejects(manager.pushLocal({ content_type: type }, {}), /停止提供同步/);
+  }
+  for (const type of ['world', 'openai_preset', 'settings', 'quick_replies']) assert.equal(isSyncTypeEnabled(type), true);
+});
 
 test('Same UID owned by two users produces separate own and shared rows', () => {
   const rows = buildItemList([{ itemUid: 'same', displayName: 'local', sourceRef: 'same.json' }],

@@ -158,6 +158,10 @@ test('Phase 6 Milestone 4: 客户端安全自动同步引擎与防打扰保护 (
 
   await t.test('6. 正常空闲流程：串行推送开启项，记录时间戳与状态', async () => {
     const storage = createMockStorage([
+      ...['novel_preset', 'kobold_preset', 'instruct', 'context', 'sysprompt', 'textgen_preset'].map(content_type => ({
+        binding_uid: content_type, account_handle: 'nuobao', content_type,
+        enabled: true, sync_mode: SyncMode.OWN, display_name: 'Removed category',
+      })),
       {
         binding_uid: 'b1',
         account_handle: 'nuobao',

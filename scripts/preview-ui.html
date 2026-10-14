@@ -10,8 +10,11 @@
   #entry { width:min(600px,90vw);margin:100px auto; }
   #cfgsync-main-modal-backdrop { padding-top:50px !important; }
   #cfgsync-modal-dialog .cfgsync-panel-container { max-height:calc(100dvh - 72px) !important; }
+  /* Simulate host rules that previously centered metadata and distorted checkboxes. */
+  body[data-host-styles] .popup { text-align:center; }
+  body[data-host-styles] input[type="checkbox"] { appearance:none; transform:scale(.65); margin:-6px; width:24px; height:24px; }
 </style></head>
-<body><div class="preview-controls"><span>示例数据预览</span><button id="theme">切换明暗主题</button><button id="mobile">手机宽度</button><button id="desktop">桌面宽度</button></div><main id="entry"></main>
+<body data-host-styles><div class="preview-controls"><span>示例数据预览</span><button id="theme">切换明暗主题</button><button id="mobile">手机宽度</button><button id="desktop">桌面宽度</button></div><main id="entry"></main>
 <script type="module">
 import { CloudConfigPanel } from '/src/client/ui/panel.js';
 import { ClientSyncManager } from '/src/client/syncManager.js';

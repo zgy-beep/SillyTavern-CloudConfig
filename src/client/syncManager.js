@@ -1,4 +1,5 @@
 import { SyncState, SyncMode } from '../common/constants.js';
+import { isSyncTypeEnabled } from '../common/syncTypes.js';
 import { getClientInstanceId } from './db/idb.js';
 
 /**
@@ -19,6 +20,7 @@ export class ClientSyncManager {
    * 开启某项配置的云同步
    */
   async enableSync(accountHandle, contentType, itemUid, displayName, localContent = null, sourceOwnerHandle = null) {
+    if (!isSyncTypeEnabled(contentType)) throw new Error('此分类已停止提供同步');
     const sourceOwner = sourceOwnerHandle || accountHandle;
     const bindingUid = this.storage.makeBindingUid(accountHandle, sourceOwner, contentType, itemUid);
     let binding = await this.storage.getBinding(bindingUid);
@@ -87,6 +89,7 @@ export class ClientSyncManager {
    * 将本地配置推送到云端（支持时间快照与网盘式直传）
    */
   async pushLocal(binding, localPayload, options = {}) {
+    if (!isSyncTypeEnabled(binding.content_type)) throw new Error('此分类已停止提供同步');
     if (binding.source_owner_handle && binding.account_handle
       && binding.source_owner_handle !== binding.account_handle) throw new Error('共享配置为只读，请拉取所有者的更新');
     try {

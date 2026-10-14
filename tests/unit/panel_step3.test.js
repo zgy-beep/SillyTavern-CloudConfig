@@ -52,6 +52,9 @@ test('Step 3: Character / Theme UI & Sequential One-Click Backup', async (t) => 
         { enabled: true, item_uid: 'item1', content_type: 'character', display_name: 'Seraphina' },
         { enabled: true, item_uid: 'item2', content_type: 'openai_preset', display_name: 'Failing Preset' },
         { enabled: true, item_uid: 'item3', content_type: 'theme', display_name: 'Dark Theme' },
+        ...['novel_preset', 'kobold_preset', 'instruct', 'context', 'sysprompt', 'textgen_preset'].map(content_type => ({
+          enabled: true, item_uid: content_type, content_type, display_name: 'Removed category',
+        })),
       ],
     };
 

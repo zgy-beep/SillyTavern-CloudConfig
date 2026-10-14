@@ -1,4 +1,5 @@
 import { SyncState, SyncMode } from '../common/constants.js';
+import { isSyncTypeEnabled } from '../common/syncTypes.js';
 
 /**
  * 客户端无感自动同步引擎 (AutoSyncEngine, M4, P6-4, #12)
@@ -205,7 +206,7 @@ export class AutoSyncEngine {
 
     try {
       const bindings = await this.storage.getBindingsByAccount(handle);
-      const activeBindings = (bindings || []).filter(b => b.enabled);
+      const activeBindings = (bindings || []).filter(b => b.enabled && isSyncTypeEnabled(b.content_type));
 
       for (const binding of activeBindings) {
         // 每项同步前复查防打扰（防止执行过程中用户突然打字或收到AI响应）
